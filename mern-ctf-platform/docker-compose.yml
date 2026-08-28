@@ -1,0 +1,58 @@
+services:
+  mongo:
+    image: mongo:7
+    container_name: ctf_mongo
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_DATABASE: ctf_hosting_website
+    # ports: - "27017:27017"  # removed — only internal Docker network needed
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: mongosh --quiet --eval 'db.runCommand("ping").ok' 2>&1 | grep -q 1
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  redis:
+    image: redis:7-alpine
+    container_name: ctf_redis
+    restart: unless-stopped
+    # ports: - "6379:6379"  # removed — only internal Docker network needed
+    healthcheck:
+      test: redis-cli ping
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  app:
+    build: .
+    container_name: ctf_app
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    environment:
+      PORT: 5000
+      MONGO_URI: mongodb://mongo:27017/ctf_hosting_website
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: ${JWT_SECRET:-change_this_to_a_random_secret}
+      # JWT_HASH: HS256  # unused - removed
+      JWT_EXPIRES_IN: 72h
+      CLIENT_URL: https://dailyctf.jkkniuctf.tech
+      DEFAULT_ADMIN_PASSWORD: ${DEFAULT_ADMIN_PASSWORD:-admin123}
+      NODE_ENV: production
+      CLOUDINARY_CLOUD_NAME: ${CLOUDINARY_CLOUD_NAME:-}
+      CLOUDINARY_API_KEY: ${CLOUDINARY_API_KEY:-}
+      CLOUDINARY_API_SECRET: ${CLOUDINARY_API_SECRET:-}
+    volumes:
+      - uploads_data:/app/server/uploads
+    depends_on:
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+volumes:
+  mongo_data:
+  uploads_data:

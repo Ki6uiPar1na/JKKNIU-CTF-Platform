@@ -1,0 +1,48 @@
+# Render Blueprint — JKKNIU Cyber Security Club CTF Platform (MERN)
+#
+# Deploy: Render Dashboard -> New -> Blueprint -> select this GitHub repo.
+# It builds mern-ctf-platform/Dockerfile as a web service.
+#
+# The OLD local Docker Mongo/Redis (docker-compose.yml) is NOT used and is untouched.
+# The app connects to a MongoDB Atlas cluster you create (free M0 tier is enough).
+#
+# After creating the Blueprint you will be prompted to fill:
+#   MONGO_URI             -> your Atlas connection string, e.g. mongodb+srv://<user>:<pass>@cluster0.xxxxx.mongodb.net/ctf_hosting_website
+#   DEFAULT_ADMIN_PASSWORD-> first-boot admin password (admin@jkkniu.edu.bd)
+#   CLIENT_URL            -> this app's URL, e.g. https://jkkniu-ctf-platform.onrender.com (used only for reset-password emails)
+#   REDIS_URL             -> optional. Provider or the App still works without it (caching is best-effort). Example: Upstash or a Render Key Value string.
+
+services:
+  - type: web
+    name: jkkniu-ctf-platform
+    runtime: docker
+    region: oregon
+    plan: free
+    healthCheckPath: /api/health
+    autoDeployTrigger: commit
+    rootDir: mern-ctf-platform
+    dockerfilePath: Dockerfile
+    dockerContextPath: .
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: "5000"
+      - key: JWT_SECRET
+        generateValue: true
+      - key: JWT_EXPIRES_IN
+        value: 72h
+      - key: MONGO_URI
+        sync: false
+      - key: DEFAULT_ADMIN_PASSWORD
+        sync: false
+      - key: CLIENT_URL
+        sync: false
+      - key: REDIS_URL
+        sync: false
+      - key: CLOUDINARY_CLOUD_NAME
+        sync: false
+      - key: CLOUDINARY_API_KEY
+        sync: false
+      - key: CLOUDINARY_API_SECRET
+        sync: false
