@@ -13,6 +13,22 @@ const platformStatusSchema = new mongoose.Schema({
   smtp_pass: { type: String, default: '' },
   smtp_from_email: { type: String, default: '' },
   smtp_from_name: { type: String, default: '' },
+  discord_webhooks: {
+    type: {
+      new_challenge: { enabled: { type: Boolean, default: false }, webhook_url: { type: String, default: '' } },
+      blood: { enabled: { type: Boolean, default: false }, webhook_url: { type: String, default: '' } },
+      ban: { enabled: { type: Boolean, default: false }, webhook_url: { type: String, default: '' } },
+      new_contest: { enabled: { type: Boolean, default: false }, webhook_url: { type: String, default: '' } },
+      contest_end: { enabled: { type: Boolean, default: false }, webhook_url: { type: String, default: '' } },
+    },
+    default: () => ({
+      new_challenge: { enabled: false, webhook_url: '' },
+      blood: { enabled: false, webhook_url: '' },
+      ban: { enabled: false, webhook_url: '' },
+      new_contest: { enabled: false, webhook_url: '' },
+      contest_end: { enabled: false, webhook_url: '' },
+    }),
+  },
 }, { timestamps: true });
 
 platformStatusSchema.methods.getTransporter = function () {

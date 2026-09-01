@@ -3,6 +3,22 @@ import api from '../../utils/api';
 import { useToast } from '../../components/Toast';
 import AdminSidebar from '../../components/AdminSidebar';
 
+const DISCORD_DEFAULTS = {
+  new_challenge: { enabled: false, webhook_url: '' },
+  blood: { enabled: false, webhook_url: '' },
+  ban: { enabled: false, webhook_url: '' },
+  new_contest: { enabled: false, webhook_url: '' },
+  contest_end: { enabled: false, webhook_url: '' },
+};
+
+const DISCORD_EVENTS = [
+  { key: 'new_challenge', icon: 'fa-flask', label: 'New Challenge', desc: 'Posted when an admin adds a challenge to a contest.' },
+  { key: 'blood', icon: 'fa-trophy', label: '1st / 2nd / 3rd Blood', desc: 'Posted when the first, second, or third user/team solves a challenge.' },
+  { key: 'ban', icon: 'fa-ban', label: 'Bans', desc: 'Posted when a user or team is banned from a contest.' },
+  { key: 'new_contest', icon: 'fa-bullhorn', label: 'New Contest', desc: 'Posted when a new contest is created.' },
+  { key: 'contest_end', icon: 'fa-flag-checkered', label: 'Contest Finished', desc: 'Posted when a contest is archived, with a top-5 scoreboard summary.' },
+];
+
 export default function AdminSettings() {
   const [status, setStatus] = useState(null);
   const [startTime, setStartTime] = useState('');
@@ -21,6 +37,9 @@ export default function AdminSettings() {
   const [emailMessage, setEmailMessage] = useState('');
   const [sendingEmail, setSendingEmail] = useState(false);
   const [selectAll, setSelectAll] = useState(false);
+  const [discord, setDiscord] = useState(DISCORD_DEFAULTS);
+  const [savingDiscord, setSavingDiscord] = useState(false);
+  const [testingDiscordEvent, setTestingDiscordEvent] = useState(null);
   const { showToast } = useToast();
 
   const load = async () => {
@@ -28,6 +47,17 @@ export default function AdminSettings() {
     catch { showToast('Failed to load platform status', 'error'); }
     try { const res = await api.get('/admin/smtp-config'); if (res.data.success && res.data.data) { setSmtp(prev => ({ ...prev, ...res.data.data })); } }
     catch { /* smtp config may not exist */ }
+    try {
+      const res = await api.get('/admin/discord-config');
+      if (res.data.success && res.data.data) {
+        const merged = {};
+        for (const key of Object.keys(DISCORD_DEFAULTS)) {
+          merged[key] = { enabled: !!res.data.data[key]?.enabled, webhook_url: res.data.data[key]?.webhook_url || '' };
+        }
+        setDiscord(merged);
+      }
+    }
+    catch { /* discord config may not exist */ }
     try { const res = await api.get('/admin/users'); if (res.data.success) setUsers(res.data.users); }
     catch { /* users may not load */ }
   };
@@ -124,6 +154,29 @@ export default function AdminSettings() {
     if (!file) return;
     setLogoFile(file);
     setLogoPreview(URL.createObjectURL(file));
+  };
+
+  const handleDiscordChange = (eventKey, field, value) => {
+    setDiscord(prev => ({ ...prev, [eventKey]: { ...prev[eventKey], [field]: value } }));
+  };
+
+  const handleSaveDiscord = async () => {
+    setSavingDiscord(true);
+    try {
+      const res = await api.put('/admin/discord-config', { discord_webhooks: discord });
+      if (res.data.success) { showToast('Discord notification settings saved.', 'success'); }
+    } catch (err) { showToast(err.response?.data?.error || 'Failed to save Discord settings.', 'error'); }
+    finally { setSavingDiscord(false); }
+  };
+
+  const handleTestDiscord = async (eventKey) => {
+    setTestingDiscordEvent(eventKey);
+    try {
+      const res = await api.post('/admin/discord-config/test', { event: eventKey, webhook_url: discord[eventKey]?.webhook_url || '' });
+      if (res.data.success) showToast('Test message sent to Discord.', 'success');
+      else showToast(res.data.error || 'Test failed.', 'error');
+    } catch (err) { showToast(err.response?.data?.error || 'Test failed.', 'error'); }
+    finally { setTestingDiscordEvent(null); }
   };
 
   return (
@@ -270,6 +323,54 @@ export default function AdminSettings() {
               {testingSmtp ? <><span className="spinner-border spinner-border-sm me-1"></span> Testing...</> : <><i className="fas fa-plug me-1"></i> Test Connection</>}
             </button>
           </div>
+        </div>
+
+        <div className="neon-card mb-4">
+          <h4 className="mb-1"><i className="fab fa-discord me-2" style={{ color: '#5865F2' }}></i>Discord Notifications</h4>
+          <p className="text-muted small mb-3">Each event posts to its own webhook (channel). Create a webhook in your Discord server's channel settings, then enable it here.</p>
+          <div className="d-flex flex-column gap-3">
+            {DISCORD_EVENTS.map(ev => (
+              <div key={ev.key} className="p-3" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 'var(--radius)' }}>
+                <div className="d-flex align-items-start gap-2 flex-wrap">
+                  <div className="form-check mt-1">
+                    <input
+                      type="checkbox"
+                      className="form-check-input"
+                      id={`discord-${ev.key}`}
+                      checked={!!discord[ev.key]?.enabled}
+                      onChange={e => handleDiscordChange(ev.key, 'enabled', e.target.checked)}
+                    />
+                    <label className="form-check-label fw-semibold" htmlFor={`discord-${ev.key}`}>
+                      <i className={`fas ${ev.icon} me-1`} style={{ color: 'var(--accent)' }}></i>{ev.label}
+                    </label>
+                  </div>
+                  <div style={{ flex: '1 1 280px', minWidth: 0 }}>
+                    <p className="text-muted small mb-1">{ev.desc}</p>
+                    <div className="d-flex gap-2">
+                      <input
+                        type="text"
+                        className="form-control form-control-sm"
+                        placeholder="https://discord.com/api/webhooks/..."
+                        value={discord[ev.key]?.webhook_url || ''}
+                        onChange={e => handleDiscordChange(ev.key, 'webhook_url', e.target.value)}
+                        disabled={!discord[ev.key]?.enabled}
+                      />
+                      <button
+                        className="btn btn-outline-info btn-sm text-nowrap"
+                        onClick={() => handleTestDiscord(ev.key)}
+                        disabled={!discord[ev.key]?.webhook_url || testingDiscordEvent === ev.key}
+                      >
+                        {testingDiscordEvent === ev.key ? <span className="spinner-border spinner-border-sm"></span> : <><i className="fas fa-paper-plane me-1"></i>Test</>}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+          <button className="btn btn-neon mt-3" onClick={handleSaveDiscord} disabled={savingDiscord}>
+            {savingDiscord ? <><span className="spinner-border spinner-border-sm me-1"></span> Saving...</> : <><i className="fas fa-save me-1"></i> Save Discord Notifications</>}
+          </button>
         </div>
       </div>
     </div>

@@ -9,6 +9,8 @@ import Flag from '../models/Flag.js';
 import PreRegistration from '../models/PreRegistration.js';
 import { cacheDel, makeCacheKey } from '../utils/redis.js';
 import { verifyToken } from '../middleware/auth.js';
+import { getContestBan } from '../utils/contestBan.js';
+import { notifyBloodIfEarned } from '../utils/discordNotifier.js';
 
 const router = Router();
 
@@ -49,16 +51,24 @@ router.post('/submit', verifyToken, async (req, res) => {
       return res.json({ success: false, submission_type: 'blank', message: 'Submissions are paused for this contest.' });
     }
 
-    const preReg = await PreRegistration.findOne({ contest_id: contestId, user_id: user_id });
-    if (!preReg || preReg.status !== 'accepted') {
-      return res.json({ success: false, submission_type: 'blank', message: 'Your pre-registration has not been accepted yet.' });
+    if (await getContestBan(contestId, user_id)) {
+      return res.json({ success: false, submission_type: 'blank', message: 'You are banned from this contest.' });
+    }
+
+    if (contest.pre_registration_enabled) {
+      const preReg = await PreRegistration.findOne({ contest_id: contestId, user_id: user_id });
+      if (!preReg || preReg.status !== 'accepted') {
+        return res.json({ success: false, submission_type: 'blank', message: 'Your pre-registration has not been accepted yet.' });
+      }
     }
 
     let team_id = null;
+    let team_name = null;
     if (contest.participation_mode === 'team') {
       const team = await Team.findOne({ contest_id: contestId, members: user_id });
       if (!team) return res.json({ success: false, submission_type: 'blank', message: 'You must be in a team to submit in this contest.' });
       team_id = team._id;
+      team_name = team.name;
     }
 
     const challenge = await Challenge.findOne({ _id: challenge_id, contest_id: contestId });
@@ -66,20 +76,27 @@ router.post('/submit', verifyToken, async (req, res) => {
       return res.json({ success: false, submission_type: 'blank', message: 'Challenge not found.' });
     }
 
+    if (challenge.visibility !== 1) {
+      return res.json({ success: false, submission_type: 'blank', message: 'Challenge not found.' });
+    }
+
+    const isPractice = challenge.submission_enabled === 0;
+
     const subFilter = { challenge_id, contest_id: contestId };
     if (team_id) subFilter.team_id = team_id;
     else subFilter.user_id = user_id;
 
     const userSubs = await Submission.find(subFilter);
-    const totalSubmissions = userSubs.length;
-    const solved = userSubs.some(s => s.submission_type === 'correct');
+    const scoredSubs = userSubs.filter(s => !s.practice);
 
-    if (solved) {
-      return res.json({ success: false, submission_type: 'already_solved', message: 'This challenge is already solved.' });
-    }
-
-    if (totalSubmissions >= challenge.max_attempts) {
-      return res.json({ success: false, submission_type: 'blank', message: 'No remaining attempts.' });
+    if (!isPractice) {
+      const solved = scoredSubs.some(s => s.submission_type === 'correct');
+      if (solved) {
+        return res.json({ success: false, submission_type: 'already_solved', message: 'This challenge is already solved.' });
+      }
+      if (scoredSubs.length >= challenge.max_attempts) {
+        return res.json({ success: false, submission_type: 'blank', message: 'No remaining attempts.' });
+      }
     }
 
     const flags = await Flag.find({ challenge_id });
@@ -97,11 +114,12 @@ router.post('/submit', verifyToken, async (req, res) => {
       user_id,
       team_id,
       submission_type,
+      practice: isPractice,
     });
 
-    let responseMessage = 'Wrong Flag';
+    let responseMessage = isPractice ? 'Wrong Flag (practice — no points affected)' : 'Wrong Flag';
 
-    if (submission_type === 'correct') {
+    if (submission_type === 'correct' && !isPractice) {
       try {
         const solveData = {
           submission_id: submission._id,
@@ -112,6 +130,10 @@ router.post('/submit', verifyToken, async (req, res) => {
         };
         if (team_id) solveData.team_id = team_id;
         await Solve.create(solveData);
+        notifyBloodIfEarned(contestId, challenge_id, {
+          solver_name: team_name || req.user?.user_name || 'Anonymous',
+          contest_title: contest.title,
+        });
         await cacheDel(makeCacheKey(`/api/contests/${contestId}/scoreboard*`));
         await cacheDel(makeCacheKey(`/api/contests/${contestId}/scoreboard/timeline*`));
       } catch (err) {
@@ -121,9 +143,11 @@ router.post('/submit', verifyToken, async (req, res) => {
         throw err;
       }
       responseMessage = 'Correct flag! Challenge solved.';
+    } else if (submission_type === 'correct' && isPractice) {
+      responseMessage = 'Correct flag! (practice — no points awarded)';
     }
 
-    res.json({ success: true, submission_type, message: responseMessage });
+    res.json({ success: true, submission_type, practice: isPractice, message: responseMessage });
   } catch (err) {
     res.status(500).json({ success: false, submission_type: 'blank', message: 'Server error.' });
   }

@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import bcrypt from 'bcryptjs';
+import crypto from 'crypto';
 import User from '../models/User.js';
 import { generateToken } from '../utils/jwt.js';
 import { validateCaptcha } from '../middleware/captcha.js';
@@ -7,17 +8,30 @@ import { verifyToken } from '../middleware/auth.js';
 
 const router = Router();
 
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+function normalizeEmail(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function sha256(value) {
+  return crypto.createHash('sha256').update(value).digest('hex');
+}
+
 router.post('/signup', validateCaptcha, async (req, res) => {
   try {
-    const { member_id, full_name, username, email, password, session } = req.body;
+    const { member_id, full_name, username, password, session } = req.body;
+    const email = normalizeEmail(req.body.email);
 
     const errors = {};
     if (!member_id) errors.member_id = 'Member ID is required.';
+    else if (!/^\d+$/.test(String(member_id))) errors.member_id = 'Member ID must be numeric.';
     if (!full_name) errors.full_name = 'Full name is required.';
     else if (full_name.length > 100) errors.full_name = 'Full name must be under 100 characters.';
     if (!username || username.length < 3) errors.username = 'Username must be at least 3 characters.';
     else if (username.length > 30) errors.username = 'Username must be under 30 characters.';
     if (!email) errors.email = 'Email is required.';
+    else if (!EMAIL_RE.test(email)) errors.email = 'Please provide a valid email address.';
     else if (email.length > 100) errors.email = 'Email must be under 100 characters.';
     if (!password) errors.password = 'Password is required.';
     else if (password.length < 8) errors.password = 'Password must be at least 8 characters.';
@@ -41,7 +55,7 @@ router.post('/signup', validateCaptcha, async (req, res) => {
     }
 
     const user = await User.create({
-      member_id,
+      member_id: Number(member_id),
       full_name,
       user_name: username,
       email,
@@ -59,11 +73,13 @@ router.post('/signup', validateCaptcha, async (req, res) => {
 
 router.post('/login', validateCaptcha, async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const { email: rawEmail, password } = req.body;
 
-    if (!email || !password) {
+    if (!rawEmail || !password) {
       return res.status(400).json({ success: false, error: 'Please provide both email and password.' });
     }
+
+    const email = normalizeEmail(rawEmail);
 
     const user = await User.findOne({ email });
 
@@ -94,6 +110,13 @@ router.post('/login', validateCaptcha, async (req, res) => {
       return res.status(403).json({
         success: false,
         error: 'Your account has been deactivated. Contact support.',
+      });
+    }
+
+    if (userStatus === 3) {
+      return res.status(403).json({
+        success: false,
+        error: 'Your account has been rejected. Contact the club executives.',
       });
     }
 
@@ -138,16 +161,15 @@ router.post('/refresh', verifyToken, async (req, res) => {
 
 router.post('/forgot-password', async (req, res) => {
   try {
-    const { email } = req.body;
+    const email = normalizeEmail(req.body.email);
     if (!email) return res.status(400).json({ success: false, error: 'Email is required.' });
 
     const user = await User.findOne({ email });
     // Don't reveal whether email exists
     if (!user) return res.json({ success: true, message: 'If that email is registered, a reset link has been sent.' });
 
-    const crypto = (await import('crypto')).default;
     const token = crypto.randomBytes(32).toString('hex');
-    user.reset_password_token = token;
+    user.reset_password_token = sha256(token);
     user.reset_password_expires = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
     await user.save();
 
@@ -184,19 +206,20 @@ router.post('/forgot-password', async (req, res) => {
 
 router.post('/reset-password/:token', async (req, res) => {
   try {
-    const { token } = req.params;
+    const rawToken = req.params.token;
     const { password } = req.body;
 
     if (!password || password.length < 8) return res.status(400).json({ success: false, error: 'Password must be at least 8 characters.' });
 
     const user = await User.findOne({
-      reset_password_token: token,
+      reset_password_token: sha256(rawToken),
       reset_password_expires: { $gt: new Date() },
     });
 
     if (!user) return res.status(400).json({ success: false, error: 'Reset token is invalid or expired.' });
 
     user.password = password;
+    user.token_version = (user.token_version || 0) + 1;
     user.reset_password_token = null;
     user.reset_password_expires = null;
     await user.save();

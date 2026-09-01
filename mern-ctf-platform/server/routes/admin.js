@@ -27,6 +27,7 @@ import { validateObjectId } from '../middleware/validateObjectId.js';
 
 import { getContestBans, bannedMatchStage } from '../utils/contestBan.js';
 import { storeFile, deleteStoredFile } from '../utils/cloudinary.js';
+import { isValidWebhookUrl, notifyDiscord, getScoreSummary, sendDiscordTest, DISCORD_EVENTS } from '../utils/discordNotifier.js';
 
 function csvValue(v) {
   const s = String(v ?? '');
@@ -38,6 +39,12 @@ function csvValue(v) {
 }
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+function normalizeEmail(value) {
+  return String(value || '').trim().toLowerCase();
+}
 
 const router = Router();
 router.use(verifyToken, adminOnly);
@@ -146,6 +153,9 @@ router.post('/contests', async (req, res) => {
     logAdminAction(req, 'Created contest', 'contest', contest._id, `Title: ${title}`);
     await cacheDel(makeCacheKey('/api/contests*'));
     await cacheDel(makeCacheKey('/api/admin/contests*'));
+    const host = req.get('host');
+    const isLoopback = !host || host.startsWith('localhost') || host.startsWith('127.0.0.1');
+    notifyDiscord('new_contest', { contest, base_url: `${isLoopback ? 'http' : 'https'}://${host || 'dailyctf.jkkniuctf.tech'}` });
     res.json({ success: true, message: 'Contest created successfully.', contest });
   } catch (err) {
     res.status(500).json({ success: false, error: 'Server error.' });
@@ -167,6 +177,7 @@ router.put('/contests/:id', async (req, res) => {
     const { title, description, banner_url, startDate, endDate, isArchived, paused, submission_status, scoreboard_visibility, scoreboard_freeze_time, participation_mode, max_team_size } = req.body;
     const contest = await Contest.findById(req.params.id);
     if (!contest) return res.status(404).json({ success: false, error: 'Contest not found.' });
+    const wasArchived = contest.isArchived;
 
     if (title !== undefined) contest.title = title;
     if (description !== undefined) contest.description = stripHtml(description);
@@ -185,6 +196,10 @@ router.put('/contests/:id', async (req, res) => {
     if (max_team_size !== undefined) contest.max_team_size = max_team_size;
 
     await contest.save();
+    if (isArchived === true && !wasArchived) {
+      const scoreboard = await getScoreSummary(contest._id, 5);
+      notifyDiscord('contest_end', { contest_title: contest.title, contest_id: contest._id, scoreboard });
+    }
     logAdminAction(req, 'Updated contest', 'contest', contest._id, `Title: ${contest.title}`);
     await cacheDel(makeCacheKey('/api/contests*'));
     await cacheDel(makeCacheKey(`/api/admin/contests*`));
@@ -243,14 +258,47 @@ router.post('/contests/:id/banner', (req, res) => {
 
 router.get('/contests/:contestId/challenges', cache(15), async (req, res) => {
   try {
-    const challenges = await Challenge.find({ contest_id: req.params.contestId }).sort({ category: 1 });
+    const contestId = req.params.contestId;
+    const challenges = await Challenge.find({ contest_id: contestId }).sort({ category: 1 });
+
+    const solvesAgg = await Solve.aggregate([
+      { $match: { contest_id: new mongoose.Types.ObjectId(contestId) } },
+      {
+        $lookup: { from: 'users', localField: 'user_id', foreignField: '_id', as: 'user' },
+      },
+      {
+        $lookup: { from: 'teams', localField: 'team_id', foreignField: '_id', as: 'team' },
+      },
+      {
+        $group: {
+          _id: '$challenge_id',
+          solve_rows: { $sum: 1 },
+          entries: { $push: { user: { $first: '$user.user_name' }, team: { $first: '$team.name' } } },
+        },
+      },
+    ]);
+    const solveMap = new Map();
+    for (const s of solvesAgg) {
+      const unique = [];
+      const seen = new Set();
+      for (const e of s.entries) {
+        const name = (e.team || e.user || '').toString().trim();
+        if (!name || seen.has(name)) continue;
+        seen.add(name);
+        unique.push(name);
+      }
+      solveMap.set(s._id.toString(), { count: s.solve_rows, solvers: unique });
+    }
+
     const result = [];
     for (const ch of challenges) {
       const flags = await Flag.find({ challenge_id: ch._id });
+      const sol = solveMap.get(ch._id.toString()) || { count: 0, solvers: [] };
       result.push({
         ...ch.toObject(),
         flags: flags.map(f => f.value),
         is_case_sensitive: flags.length > 0 ? flags[0].is_case_sensitive : false,
+        solves: { count: sol.count, solvers: sol.solvers },
       });
     }
     res.json({ success: true, challenges: result });
@@ -261,7 +309,7 @@ router.get('/contests/:contestId/challenges', cache(15), async (req, res) => {
 
 router.post('/contests/:contestId/challenges', async (req, res) => {
   try {
-    const { challenge_name, category, description, points, max_attempts, flag_value, case_sensitive, visibility } = req.body;
+    const { challenge_name, category, description, points, max_attempts, flag_value, case_sensitive, visibility, submission_enabled } = req.body;
     const contestId = req.params.contestId;
 
     const contest = await Contest.findById(contestId);
@@ -290,6 +338,7 @@ router.post('/contests/:contestId/challenges', async (req, res) => {
       max_attempts,
       category,
       visibility: visibility ?? 1,
+      submission_enabled: submission_enabled ?? 1,
     });
 
     const flags = flag_value.split(',').map(f => f.trim()).filter(Boolean);
@@ -304,6 +353,7 @@ router.post('/contests/:contestId/challenges', async (req, res) => {
     logAdminAction(req, 'Created challenge', 'challenge', challenge._id, `Name: ${challenge_name}, Contest: ${contestId}`);
     await cacheDel(makeCacheKey(`/api/contests/${contestId}/challenges*`));
     await cacheDel(makeCacheKey(`/api/admin/contests/${contestId}/challenges*`));
+    notifyDiscord('new_challenge', { challenge, contest });
     res.json({ success: true, message: 'Challenge added successfully.', challenge });
   } catch (err) {
     res.status(500).json({ success: false, error: 'Server error.' });
@@ -358,9 +408,32 @@ router.put('/challenges/bulk-visibility', async (req, res) => {
   }
 });
 
+router.put('/challenges/bulk-submission', async (req, res) => {
+  try {
+    const { ids, submission_enabled } = req.body;
+    if (!ids || !Array.isArray(ids) || ids.length === 0) return res.status(400).json({ success: false, error: 'No challenge IDs provided.' });
+    if (submission_enabled !== 0 && submission_enabled !== 1) return res.status(400).json({ success: false, error: 'Submission status must be 0 or 1.' });
+
+    const challenges = await Challenge.find({ _id: { $in: ids } });
+    const contestIds = [...new Set(challenges.map(c => c.contest_id.toString()))];
+
+    await Challenge.updateMany({ _id: { $in: ids } }, { $set: { submission_enabled } });
+
+    for (const cid of contestIds) {
+      await cacheDel(makeCacheKey(`/api/contests/${cid}/challenges*`));
+      await cacheDel(makeCacheKey(`/api/admin/contests/${cid}/challenges*`));
+    }
+
+    logAdminAction(req, `Bulk set challenges submission to ${submission_enabled}`, 'challenge', '', `IDs: ${ids.join(', ')}`);
+    res.json({ success: true, message: `${ids.length} challenges updated.` });
+  } catch (err) {
+    res.status(500).json({ success: false, error: 'Server error.' });
+  }
+});
+
 router.put('/challenges/:id', async (req, res) => {
   try {
-    const { challenge_name, category, description, points, max_attempts, flag_value, case_sensitive, visibility } = req.body;
+    const { challenge_name, category, description, points, max_attempts, flag_value, case_sensitive, visibility, submission_enabled } = req.body;
     const challenge = await Challenge.findByIdAndUpdate(req.params.id, {
       name: challenge_name,
       description: stripHtml(description || ''),
@@ -368,6 +441,7 @@ router.put('/challenges/:id', async (req, res) => {
       max_attempts,
       category,
       visibility,
+      submission_enabled,
     });
 
     if (!challenge) return res.status(404).json({ success: false, error: 'Challenge not found.' });
@@ -427,6 +501,30 @@ router.put('/challenges/:id/toggle-visibility', async (req, res) => {
       success: true,
       message: `Challenge visibility updated to ${challenge.visibility === 1 ? 'Visible' : 'Hidden'}.`,
       new_visibility: challenge.visibility,
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: 'Server error.' });
+  }
+});
+
+router.put('/challenges/:id/toggle-submission', async (req, res) => {
+  try {
+    const challenge = await Challenge.findById(req.params.id);
+    if (!challenge) return res.status(404).json({ success: false, error: 'Challenge not found.' });
+
+    challenge.submission_enabled = challenge.submission_enabled === 1 ? 0 : 1;
+    await challenge.save();
+
+    await cacheDel(makeCacheKey(`/api/contests/${challenge.contest_id}/challenges*`));
+    await cacheDel(makeCacheKey(`/api/admin/contests/${challenge.contest_id}/challenges*`));
+
+    logAdminAction(req, 'Toggled challenge submission', 'challenge', challenge._id, `Name: ${challenge.name}, Solving enabled: ${challenge.submission_enabled}`);
+    res.json({
+      success: true,
+      message: challenge.submission_enabled === 1
+        ? 'Challenge solving enabled — points will count.'
+        : 'Challenge locked — now open for practice only (no points awarded).',
+      new_submission_enabled: challenge.submission_enabled,
     });
   } catch (err) {
     res.status(500).json({ success: false, error: 'Server error.' });
@@ -501,9 +599,10 @@ router.put('/users/:id/status', async (req, res) => {
       logAdminAction(req, 'Approved user', 'user', req.params.id);
       res.json({ success: true, message: 'User has been approved.' });
     } else if (action === 'rejected') {
-      await User.findByIdAndDelete(req.params.id);
+      user.status = 3;
+      await user.save();
       logAdminAction(req, 'Rejected user', 'user', req.params.id);
-      res.json({ success: true, message: 'User has been rejected and deleted.' });
+      res.json({ success: true, message: 'User has been rejected.' });
     } else {
       res.status(400).json({ success: false, error: 'Invalid action.' });
     }
@@ -518,12 +617,20 @@ router.put('/users/:id', async (req, res) => {
     const user = await User.findById(req.params.id);
     if (!user) return res.status(404).json({ success: false, error: 'User not found.' });
 
+    if (user.role === 2 && req.user.user_id !== req.params.id) {
+      return res.status(403).json({ success: false, error: 'Only the superadmin account itself can modify it.' });
+    }
+    if (user.role === 0 && req.user.role === 0 && req.user.user_id !== req.params.id) {
+      return res.status(403).json({ success: false, error: 'Admins cannot modify other admins.' });
+    }
+
     if (new_password) {
       if (new_password.length < 8) return res.status(400).json({ success: false, error: 'Password must be at least 8 characters.' });
       if (!/[A-Z]/.test(new_password)) return res.status(400).json({ success: false, error: 'Password must contain an uppercase letter.' });
       if (!/[a-z]/.test(new_password)) return res.status(400).json({ success: false, error: 'Password must contain a lowercase letter.' });
       if (!/[0-9]/.test(new_password)) return res.status(400).json({ success: false, error: 'Password must contain a number.' });
       user.password = new_password;
+      user.token_version = (user.token_version || 0) + 1;
     }
     if (full_name) {
       if (full_name.length > 100) return res.status(400).json({ success: false, error: 'Full name must be under 100 characters.' });
@@ -536,10 +643,12 @@ router.put('/users/:id', async (req, res) => {
       user.user_name = user_name;
     }
     if (email) {
-      if (email.length > 100) return res.status(400).json({ success: false, error: 'Email must be under 100 characters.' });
-      const existingEmail = await User.findOne({ email, _id: { $ne: req.params.id } });
+      const normalizedEmail = normalizeEmail(email);
+      if (!EMAIL_RE.test(normalizedEmail)) return res.status(400).json({ success: false, error: 'Please provide a valid email address.' });
+      if (normalizedEmail.length > 100) return res.status(400).json({ success: false, error: 'Email must be under 100 characters.' });
+      const existingEmail = await User.findOne({ email: normalizedEmail, _id: { $ne: req.params.id } });
       if (existingEmail) return res.status(400).json({ success: false, error: 'Email is already registered.' });
-      user.email = email;
+      user.email = normalizedEmail;
     }
     await user.save();
     logAdminAction(req, 'Updated user', 'user', req.params.id);
@@ -551,14 +660,17 @@ router.put('/users/:id', async (req, res) => {
 
 router.post('/users', async (req, res) => {
   try {
-    const { member_id, full_name, user_name, email, password, session } = req.body;
+    const { member_id, full_name, user_name, password, session } = req.body;
+    const email = normalizeEmail(req.body.email);
     const errors = {};
     if (!full_name) errors.full_name = 'Full name is required.';
     else if (full_name.length > 100) errors.full_name = 'Full name must be under 100 characters.';
     if (!user_name) errors.user_name = 'Username is required.';
     else if (user_name.length > 30) errors.user_name = 'Username must be under 30 characters.';
     if (!email) errors.email = 'Email is required.';
+    else if (!EMAIL_RE.test(email)) errors.email = 'Please provide a valid email address.';
     else if (email.length > 100) errors.email = 'Email must be under 100 characters.';
+    if (member_id && !/^\d+$/.test(String(member_id))) errors.member_id = 'Member ID must be numeric.';
     if (!password) errors.password = 'Password is required.';
     else if (password.length < 8) errors.password = 'Password must be at least 8 characters.';
     else if (!/[A-Z]/.test(password)) errors.password = 'Password must contain an uppercase letter.';
@@ -573,7 +685,7 @@ router.post('/users', async (req, res) => {
     if (existingUsername) return res.status(400).json({ success: false, error: 'Username is already taken.' });
 
     const user = await User.create({
-      member_id: member_id || Math.floor(Math.random() * 100000),
+      member_id: member_id ? Number(member_id) : Math.floor(Math.random() * 100000),
       full_name,
       user_name,
       email,
@@ -759,13 +871,16 @@ router.post('/contests/:id/bans', async (req, res) => {
       return res.status(400).json({ success: false, error: 'Provide a valid user_id or team_id to ban.' });
     }
 
+    let targetName = '';
     if (filter.team_id) {
       const team = await Team.findOne({ _id: filter.team_id, contest_id: contest._id });
       if (!team) return res.status(404).json({ success: false, error: 'Team not found in this contest.' });
+      targetName = team.name;
     } else {
       const user = await User.findById(filter.user_id);
       if (!user) return res.status(404).json({ success: false, error: 'User not found.' });
       if (user.role !== 1) return res.status(400).json({ success: false, error: 'You cannot ban admins.' });
+      targetName = user.user_name;
     }
 
     const existing = await ContestBan.findOne(filter);
@@ -780,6 +895,12 @@ router.post('/contests/:id/bans', async (req, res) => {
     });
     const target = filter.team_id ? `Team ${team_id}` : `User ${user_id}`;
     logAdminAction(req, 'Banned from contest', 'contest', contest._id, `Banned ${target}${reason ? `: ${reason}` : ''}`);
+    notifyDiscord('ban', {
+      target_type: filter.team_id ? 'team' : 'user',
+      target_name: targetName,
+      contest_title: contest.title,
+      reason: String(reason || ''),
+    });
 
     res.json({ success: true, message: 'User/team banned from the contest. Their saved points remain intact.', ban });
   } catch (err) {
@@ -831,6 +952,7 @@ router.get('/submissions', async (req, res) => {
       contest_title: s.contest_id?.title,
       submitted_flag: s.submitted_flag,
       submission_type: s.submission_type,
+      practice: !!s.practice,
       timestamp_of_submission: s.createdAt,
     }));
 
@@ -838,6 +960,39 @@ router.get('/submissions', async (req, res) => {
       success: true,
       data,
       pagination: { total_rows: total, total_pages: totalPages, current_page: page, limit },
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: 'Server error.' });
+  }
+});
+
+router.get('/submissions/:id', async (req, res) => {
+  try {
+    const submission = await Submission.findById(req.params.id)
+      .populate('user_id', 'user_name full_name email member_id')
+      .populate({ path: 'team_id', select: 'name captain', populate: { path: 'captain', select: 'user_name' } })
+      .populate('challenge_id', 'name category point max_attempts description')
+      .populate('contest_id', 'title participation_mode');
+
+    if (!submission) return res.status(404).json({ success: false, error: 'Submission not found.' });
+
+    const solve = await Solve.findOne({ submission_id: submission._id }).select('_id solved_at').lean();
+
+    res.json({
+      success: true,
+      data: {
+        submission_id: submission._id,
+        submitted_flag: submission.submitted_flag,
+        submission_type: submission.submission_type,
+        practice: !!submission.practice,
+        user: submission.user_id,
+        team: submission.team_id,
+        challenge: submission.challenge_id,
+        contest: submission.contest_id,
+        solve,
+        timestamp_of_submission: submission.createdAt,
+        updated_at: submission.updatedAt,
+      },
     });
   } catch (err) {
     res.status(500).json({ success: false, error: 'Server error.' });
@@ -993,6 +1148,67 @@ router.post('/test-smtp', superAdminOnly, async (req, res) => {
     res.json({ success: true, message: 'SMTP connection successful.' });
   } catch (err) {
     res.status(500).json({ success: false, error: `SMTP test failed: ${err.message}` });
+  }
+});
+
+// ─── Discord Notifications ───
+
+router.get('/discord-config', superAdminOnly, async (req, res) => {
+  try {
+    let status = await PlatformStatus.findById('000000000000000000000001');
+    if (!status) status = await PlatformStatus.create({});
+    res.json({ success: true, data: status.discord_webhooks });
+  } catch (err) {
+    res.status(500).json({ success: false, error: 'Server error.' });
+  }
+});
+
+router.put('/discord-config', superAdminOnly, async (req, res) => {
+  try {
+    const { discord_webhooks } = req.body;
+    if (!discord_webhooks || typeof discord_webhooks !== 'object') {
+      return res.status(400).json({ success: false, error: 'Invalid Discord configuration.' });
+    }
+
+    const config = {};
+    for (const event of DISCORD_EVENTS) {
+      const entry = discord_webhooks[event] || {};
+      const url = String(entry.webhook_url || '').trim();
+      const enabled = Boolean(entry.enabled);
+      if (url && !isValidWebhookUrl(url)) {
+        return res.status(400).json({ success: false, error: `Invalid webhook URL for ${event}. Must be a Discord webhook URL.` });
+      }
+      if (enabled && !url) {
+        return res.status(400).json({ success: false, error: `You enabled "${event}" but didn't provide a webhook URL.` });
+      }
+      config[event] = { enabled: enabled && !!url, webhook_url: url };
+    }
+
+    let status = await PlatformStatus.findById('000000000000000000000001');
+    if (!status) status = await PlatformStatus.create({});
+    status.discord_webhooks = config;
+    await status.save();
+    logAdminAction(req, 'Updated Discord webhook configuration', 'config');
+    res.json({ success: true, message: 'Discord notification settings saved.', data: status.discord_webhooks });
+  } catch (err) {
+    console.error('discord-config save error:', err.message);
+    res.status(500).json({ success: false, error: 'Server error.' });
+  }
+});
+
+router.post('/discord-config/test', superAdminOnly, async (req, res) => {
+  try {
+    const { event, webhook_url } = req.body;
+    if (!DISCORD_EVENTS.includes(event)) {
+      return res.status(400).json({ success: false, error: 'Invalid event.' });
+    }
+    if (webhook_url && String(webhook_url).trim() && !isValidWebhookUrl(webhook_url)) {
+      return res.status(400).json({ success: false, error: 'Invalid webhook URL. Must be a Discord webhook URL.' });
+    }
+    await sendDiscordTest(event, webhook_url || '');
+    res.json({ success: true, message: 'Discord test message sent.' });
+  } catch (err) {
+    res.status(400).json({ success: false, error: err.message || 'Discord test failed.' });
   }
 });
 
@@ -1245,7 +1461,7 @@ router.get('/scoreboard/:id/export', async (req, res) => {
       pipeline.push(
         { $lookup: { from: 'users', localField: 'user_id', foreignField: '_id', as: 'user' } },
         { $unwind: '$user' },
-        { $match: { 'user.role': { $ne: 0 } } },
+        { $match: { 'user.role': 1 } },
         { $group: { _id: '$user_id', user_name: { $first: '$user.user_name' }, total_score: { $sum: '$challenge.point' }, latest_solve_time: { $max: '$solved_at' } } },
       );
     }
@@ -1382,8 +1598,23 @@ router.put('/submissions/:id/toggle', async (req, res) => {
         solved_at: new Date(),
       };
       if (submission.team_id) solveData.team_id = submission.team_id;
-      await Solve.create(solveData);
+      try {
+        await Solve.create(solveData);
+      } catch (err) {
+        if (err.code === 11000) {
+          return res.status(400).json({ success: false, error: 'A solve already exists for this submission.' });
+        }
+        throw err;
+      }
       await submission.save();
+      const solverName = submission.team_id
+        ? (await Team.findById(submission.team_id).select('name'))?.name
+        : (await User.findById(submission.user_id).select('user_name'))?.user_name;
+      const contestTitle = (await Contest.findById(submission.contest_id).select('title'))?.title;
+      notifyBloodIfEarned(submission.contest_id, submission.challenge_id, {
+        solver_name: solverName || '—',
+        contest_title: contestTitle || '—',
+      });
       logAdminAction(req, 'Toggled submission to correct', 'submission', submission._id,
         `Challenge: ${submission.challenge_id}, User: ${submission.user_id}`);
     }

@@ -18,7 +18,7 @@ router.get('/', verifyToken, async (req, res) => {
       grouped[ch.category].push(ch);
     }
 
-    const subFilter = { user_id: new mongoose.Types.ObjectId(req.user.user_id) };
+    const subFilter = { user_id: new mongoose.Types.ObjectId(req.user.user_id), practice: { $ne: true } };
     if (req.query.contestId) subFilter.contest_id = req.query.contestId;
 
     const submissions = await Submission.aggregate([

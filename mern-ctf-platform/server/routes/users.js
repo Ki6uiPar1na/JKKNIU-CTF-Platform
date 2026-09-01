@@ -75,6 +75,7 @@ router.put('/password', verifyToken, async (req, res) => {
     }
 
     user.password = new_password;
+    user.token_version = (user.token_version || 0) + 1;
     await user.save();
 
     res.json({ success: true, message: 'Password updated successfully.' });
@@ -270,7 +271,7 @@ router.get('/me/contests', verifyToken, async (req, res) => {
         { $match: { 'challenge.visibility': 1 } },
         { $lookup: { from: 'users', localField: 'user_id', foreignField: '_id', as: 'user' } },
         { $unwind: '$user' },
-        { $match: { 'user.role': { $ne: 0 } } },
+        { $match: { 'user.role': 1 } },
         { $group: { _id: '$user_id', total_score: { $sum: '$challenge.point' }, latest_solve_time: { $max: '$solved_at' } } },
         { $sort: { total_score: -1, latest_solve_time: 1 } },
       ]);

@@ -7,6 +7,7 @@ const submissionSchema = new mongoose.Schema({
   user_id: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   team_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Team', default: null },
   submission_type: { type: String, enum: ['correct', 'incorrect'], required: true },
+  practice: { type: Boolean, default: false },
 }, { timestamps: true });
 
 submissionSchema.virtual('timestamp_of_submission').get(function () {

@@ -8,6 +8,7 @@ const challengeSchema = new mongoose.Schema({
   max_attempts: { type: Number, required: true },
   category: { type: String, required: true },
   visibility: { type: Number, default: 1 },
+  submission_enabled: { type: Number, default: 1 },
   files: [{ type: String }],
 }, { timestamps: true });
 

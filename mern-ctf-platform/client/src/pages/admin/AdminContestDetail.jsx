@@ -5,6 +5,7 @@ import 'react-datepicker/dist/react-datepicker.css';
 import api from '../../utils/api';
 import { useToast } from '../../components/Toast';
 import AdminSidebar from '../../components/AdminSidebar';
+import SubmissionDetailsModal from '../../components/SubmissionDetailsModal';
 import { sanitize } from '../../utils/sanitize';
 import useServerTime from '../../hooks/useServerTime';
 
@@ -84,7 +85,7 @@ function ChallengesTab({ contestId }) {
   const [challenges, setChallenges] = useState([]);
   const [showForm, setShowForm] = useState(false);
   const [edit, setEdit] = useState(null);
-  const [form, setForm] = useState({ challenge_name: '', category: '', description: '', points: '', max_attempts: '', flag_value: '', case_sensitive: 0, visibility: 1 });
+  const [form, setForm] = useState({ challenge_name: '', category: '', description: '', points: '', max_attempts: '', flag_value: '', case_sensitive: 0, visibility: 1, submission_enabled: 1 });
   const [editFiles, setEditFiles] = useState([]);
   const [pendingFiles, setPendingFiles] = useState([]);
   const [uploadingFile, setUploadingFile] = useState(false);
@@ -102,7 +103,7 @@ function ChallengesTab({ contestId }) {
   useEffect(() => { load(); }, [contestId]);
 
   const resetForm = () => {
-    setForm({ challenge_name: '', category: '', description: '', points: '', max_attempts: '', flag_value: '', case_sensitive: 0, visibility: 1 });
+    setForm({ challenge_name: '', category: '', description: '', points: '', max_attempts: '', flag_value: '', case_sensitive: 0, visibility: 1, submission_enabled: 1 });
     setEditFiles([]); setPendingFiles([]); setEdit(null); setShowForm(false); setHintsFor(null);
   };
 
@@ -110,7 +111,7 @@ function ChallengesTab({ contestId }) {
     setForm({
       challenge_name: ch.name, category: ch.category, description: ch.description,
       points: ch.point, max_attempts: ch.max_attempts,
-      flag_value: (ch.flags || []).join(', '), case_sensitive: ch.is_case_sensitive ? 1 : 0, visibility: ch.visibility,
+      flag_value: (ch.flags || []).join(', '), case_sensitive: ch.is_case_sensitive ? 1 : 0, visibility: ch.visibility, submission_enabled: ch.submission_enabled ?? 1,
     });
     setEditFiles(ch.files || []);
     setEdit(ch._id); setShowForm(true);
@@ -163,6 +164,10 @@ function ChallengesTab({ contestId }) {
     try { await api.put(`/admin/challenges/${id}/toggle-visibility`); load(); } catch { showToast('Toggle failed', 'error'); }
   };
 
+  const toggleSubmission = async (id) => {
+    try { await api.put(`/admin/challenges/${id}/toggle-submission`); load(); } catch { showToast('Toggle failed', 'error'); }
+  };
+
   const toggleSelect = (id) => {
     setSelected(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]);
   };
@@ -189,6 +194,14 @@ function ChallengesTab({ contestId }) {
     } catch { showToast('Bulk update failed', 'error'); }
   };
 
+  const handleBulkSubmission = async (submission_enabled) => {
+    if (!selected.length) return;
+    try {
+      const res = await api.put('/admin/challenges/bulk-submission', { ids: selected, submission_enabled });
+      if (res.data.success) { showToast(res.data.message, 'success'); setSelected([]); load(); }
+    } catch { showToast('Bulk update failed', 'error'); }
+  };
+
   return (
     <>
       <div className="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
@@ -203,6 +216,8 @@ function ChallengesTab({ contestId }) {
           <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>{selected.length} selected</span>
           <button className="btn btn-neon-outline btn-sm" onClick={() => handleBulkVisibility(1)}><i className="fas fa-eye me-1"></i> Show</button>
           <button className="btn btn-neon-outline btn-sm" onClick={() => handleBulkVisibility(0)}><i className="fas fa-eye-slash me-1"></i> Hide</button>
+          <button className="btn btn-neon-outline btn-sm" onClick={() => handleBulkSubmission(1)}><i className="fas fa-unlock me-1"></i> Open Solving</button>
+          <button className="btn btn-neon-outline btn-sm" onClick={() => handleBulkSubmission(0)}><i className="fas fa-ban me-1"></i> Lock Solving</button>
           <button className="btn btn-neon-danger btn-sm" onClick={handleBulkDelete}><i className="fas fa-trash me-1"></i> Delete</button>
           <button className="btn btn-sm ms-auto" style={{ color: 'var(--text-muted)' }} onClick={() => setSelected([])}><i className="fas fa-times"></i></button>
         </div>
@@ -239,11 +254,11 @@ function ChallengesTab({ contestId }) {
               </div>
             </div>
             <div className="row">
-              <div className="col-md-4 mb-3">
+              <div className="col-md-3 mb-3">
                 <label className="form-label">Max Attempts</label>
                 <input type="number" className="form-control" value={form.max_attempts} onChange={e => setForm({...form, max_attempts: e.target.value})} required />
               </div>
-              <div className="col-md-4 mb-3">
+              <div className="col-md-3 mb-3">
                 <label className="form-label">Flag Value(s) (comma-separated)</label>
                 <input className="form-control" value={form.flag_value} onChange={e => setForm({...form, flag_value: e.target.value})} required />
               </div>
@@ -257,6 +272,12 @@ function ChallengesTab({ contestId }) {
                 <label className="form-label">Visibility</label>
                 <select className="form-select" value={form.visibility} onChange={e => setForm({...form, visibility: e.target.value})}>
                   <option value={1}>Visible</option><option value={0}>Hidden</option>
+                </select>
+              </div>
+              <div className="col-md-2 mb-3">
+                <label className="form-label">Solve Status</label>
+                <select className="form-select" value={form.submission_enabled} onChange={e => setForm({...form, submission_enabled: e.target.value})}>
+                  <option value={1}>Open for solving</option><option value={0}>Locked (practice only)</option>
                 </select>
               </div>
             </div>
@@ -308,7 +329,7 @@ function ChallengesTab({ contestId }) {
                 <th style={{ width: '40px' }}>
                   <input type="checkbox" onChange={toggleSelectAll} checked={challenges.length > 0 && selected.length === challenges.length} />
                 </th>
-                <th>ID</th><th>Name</th><th>Category</th><th>Points</th><th>Attempts</th><th>Flags</th><th>Files</th><th>Visible</th><th>Actions</th>
+                <th>ID</th><th>Name</th><th>Category</th><th>Points</th><th>Attempts</th><th>Solves</th><th>Flags</th><th>Files</th><th>Visible</th><th>Solve</th><th>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -320,11 +341,17 @@ function ChallengesTab({ contestId }) {
                   <td><span className="badge" style={{ background: 'rgba(99,102,241,0.15)', color: 'var(--accent)' }}>{ch.category}</span></td>
                   <td style={{ color: 'var(--accent)', fontWeight: 600 }}>{ch.point}</td>
                   <td>{ch.max_attempts || '∞'}</td>
+                  <td><span style={{ color: 'var(--accent)', fontWeight: 600 }}>{ch.solves?.count ?? 0}</span></td>
                   <td style={{ maxWidth: '150px', overflow: 'hidden', textOverflow: 'ellipsis', fontSize: '0.8rem' }}>{(ch.flags || []).join(', ')}</td>
                   <td>{(ch.files || []).length > 0 ? <i className="fas fa-paperclip" title={(ch.files || []).map(f => f.split('/').pop()).join(', ')}></i> : '—'}</td>
                   <td>
                     <button className={`btn btn-sm ${ch.visibility ? 'btn-neon' : 'btn-neon-danger'}`} onClick={() => toggleVisibility(ch._id)}>
                       {ch.visibility ? 'Visible' : 'Hidden'}
+                    </button>
+                  </td>
+                  <td>
+                    <button className={`btn btn-sm ${ch.submission_enabled ? 'btn-neon' : 'btn-neon-danger'}`} onClick={() => toggleSubmission(ch._id)} title={ch.submission_enabled ? 'Click to lock (practice only, no points)' : 'Click to open for points'}>
+                      {ch.submission_enabled ? 'Open' : 'Practice'}
                     </button>
                   </td>
                   <td>
@@ -337,7 +364,7 @@ function ChallengesTab({ contestId }) {
                   </td>
                 </tr>
               ))}
-              {challenges.length === 0 && <tr><td colSpan="10" className="text-center">No challenges for this contest.</td></tr>}
+              {challenges.length === 0 && <tr><td colSpan="12" className="text-center">No challenges for this contest.</td></tr>}
             </tbody>
           </table>
         </div>
@@ -426,6 +453,7 @@ function SubmissionsTab({ contestId }) {
   const [data, setData] = useState([]);
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
+  const [detailId, setDetailId] = useState(null);
 
   const load = async (p = 1) => {
     try {
@@ -458,9 +486,12 @@ function SubmissionsTab({ contestId }) {
                   <td>{s.user_name}</td>
                   <td>{s.challenge_name} ({s.challenge_point})</td>
                   <td style={{ maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis' }}>{s.submitted_flag}</td>
-                  <td><span className={`badge ${s.submission_type === 'correct' ? 'bg-success' : 'bg-danger'}`}>{s.submission_type}</span></td>
+                  <td><span className={`badge ${s.submission_type === 'correct' ? 'bg-success' : 'bg-danger'}`}>{s.submission_type}</span>{s.practice && <span className="badge" style={{ background: '#facc15', color: '#000', fontSize: '0.6rem', verticalAlign: 'middle' }}>Practice</span>}</td>
                   <td>
                     <div className="d-flex gap-1">
+                      <button className="btn btn-sm" style={{ color: 'var(--accent)', padding: '0.2rem 0.4rem', fontSize: '0.75rem', border: '1px solid rgba(99,102,241,0.3)', borderRadius: 'var(--radius)' }} onClick={() => setDetailId(s.submission_id)} title="View details">
+                        <i className="fas fa-eye"></i>
+                      </button>
                       <button className="btn btn-sm" style={{ color: 'var(--accent)', padding: '0.2rem 0.4rem', fontSize: '0.75rem', border: '1px solid rgba(99,102,241,0.3)', borderRadius: 'var(--radius)' }} onClick={() => handleToggle(s.submission_id)} title="Toggle correct/incorrect">
                         <i className="fas fa-exchange-alt"></i>
                       </button>
@@ -484,6 +515,7 @@ function SubmissionsTab({ contestId }) {
           <button className="btn btn-neon-outline btn-sm" disabled={page >= totalPages} onClick={() => load(page + 1)}>Next</button>
         </div>
       )}
+      {detailId && <SubmissionDetailsModal submissionId={detailId} onClose={() => setDetailId(null)} />}
     </>
   );
 }

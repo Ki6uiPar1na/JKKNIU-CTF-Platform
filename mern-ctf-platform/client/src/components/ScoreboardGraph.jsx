@@ -121,7 +121,8 @@ export default function ScoreboardGraph({ contestId, startDate, endDate, scorebo
       </ResponsiveContainer>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.6rem 1.2rem', justifyContent: 'center', marginTop: '0.75rem' }}>
         {names.map((name, i) => (
-          <span key={name} style={{ fontSize: '0.7rem', color: COLORS[i % COLORS.length], fontWeight: 500 }}>
+          <span key={name} style={{ fontSize: '0.75rem', color: COLORS[i % COLORS.length], fontWeight: 500 }}>
+            <span style={{ fontWeight: 800, marginRight: '0.3rem' }}>#{i + 1}</span>
             {name}
           </span>
         ))}

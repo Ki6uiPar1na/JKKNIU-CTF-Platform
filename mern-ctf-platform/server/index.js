@@ -140,6 +140,12 @@ app.get('/api/platform/info', async (req, res) => {
 
 
 const uploadsPath = path.join(__dirname, 'uploads');
+const uploadsChallengesPath = path.join(uploadsPath, 'challenges');
+app.use('/uploads/challenges', (req, res, next) => {
+  res.setHeader('Content-Disposition', 'attachment');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  next();
+}, express.static(uploadsChallengesPath));
 app.use('/uploads', express.static(uploadsPath));
 
 const clientBuildPath = path.join(__dirname, '..', 'client', 'dist');

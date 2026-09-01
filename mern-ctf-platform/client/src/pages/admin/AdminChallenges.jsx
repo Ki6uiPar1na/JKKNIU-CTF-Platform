@@ -11,7 +11,7 @@ export default function AdminChallenges() {
   const [challenges, setChallenges] = useState([]);
   const [showForm, setShowForm] = useState(false);
   const [edit, setEdit] = useState(null);
-  const [form, setForm] = useState({ challenge_name: '', category: '', description: '', points: '', max_attempts: '', flag_value: '', case_sensitive: 0, visibility: 1 });
+  const [form, setForm] = useState({ challenge_name: '', category: '', description: '', points: '', max_attempts: '', flag_value: '', case_sensitive: 0, visibility: 1, submission_enabled: 1 });
   const { showToast } = useToast();
 
   const loadContests = async () => {
@@ -33,7 +33,7 @@ export default function AdminChallenges() {
   useEffect(() => { loadChallenges(); }, [contestId]);
 
   const resetForm = () => {
-    setForm({ challenge_name: '', category: '', description: '', points: '', max_attempts: '', flag_value: '', case_sensitive: 0, visibility: 1 });
+    setForm({ challenge_name: '', category: '', description: '', points: '', max_attempts: '', flag_value: '', case_sensitive: 0, visibility: 1, submission_enabled: 1 });
     setEdit(null); setShowForm(false);
   };
 
@@ -41,7 +41,7 @@ export default function AdminChallenges() {
     setForm({
       challenge_name: ch.name, category: ch.category, description: ch.description,
       points: ch.point, max_attempts: ch.max_attempts,
-      flag_value: (ch.flags || []).join(', '), case_sensitive: ch.is_case_sensitive ? 1 : 0, visibility: ch.visibility,
+      flag_value: (ch.flags || []).join(', '), case_sensitive: ch.is_case_sensitive ? 1 : 0, visibility: ch.visibility, submission_enabled: ch.submission_enabled ?? 1,
     });
     setEdit(ch._id); setShowForm(true);
   };
@@ -64,6 +64,10 @@ export default function AdminChallenges() {
 
   const toggleVisibility = async (id) => {
     try { await api.put(`/admin/challenges/${id}/toggle-visibility`); loadChallenges(); } catch { showToast('Toggle failed', 'error'); }
+  };
+
+  const toggleSubmission = async (id) => {
+    try { await api.put(`/admin/challenges/${id}/toggle-submission`); loadChallenges(); } catch { showToast('Toggle failed', 'error'); }
   };
 
   return (
@@ -111,11 +115,11 @@ export default function AdminChallenges() {
                 <textarea className="form-control" rows="4" value={form.description} onChange={e => setForm({...form, description: e.target.value})} required />
               </div>
               <div className="row">
-                <div className="col-md-4 mb-3">
+                <div className="col-md-3 mb-3">
                   <label className="form-label">Max Attempts</label>
                   <input type="number" className="form-control" value={form.max_attempts} onChange={e => setForm({...form, max_attempts: e.target.value})} required />
                 </div>
-                <div className="col-md-4 mb-3">
+                <div className="col-md-3 mb-3">
                   <label className="form-label">Flag Value(s) (comma-separated)</label>
                   <input className="form-control" value={form.flag_value} onChange={e => setForm({...form, flag_value: e.target.value})} required />
                 </div>
@@ -131,6 +135,12 @@ export default function AdminChallenges() {
                     <option value={1}>Visible</option><option value={0}>Hidden</option>
                   </select>
                 </div>
+                <div className="col-md-2 mb-3">
+                  <label className="form-label">Solve Status</label>
+                  <select className="form-select" value={form.submission_enabled} onChange={e => setForm({...form, submission_enabled: e.target.value})}>
+                    <option value={1}>Open for solving</option><option value={0}>Locked (practice only)</option>
+                  </select>
+                </div>
               </div>
               <button type="submit" className="btn btn-neon"><i className="fas fa-save me-1"></i> {edit ? 'Update' : 'Create'} Challenge</button>
             </form>
@@ -141,7 +151,7 @@ export default function AdminChallenges() {
           <table className="neon-table">
             <thead>
               <tr>
-                <th>ID</th><th>Name</th><th>Category</th><th>Points</th><th>Attempts</th><th>Flags</th><th>Visible</th><th>Actions</th>
+                <th>ID</th><th>Name</th><th>Category</th><th>Points</th><th>Attempts</th><th>Solves</th><th>Flags</th><th>Visible</th><th>Solve</th><th>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -152,10 +162,16 @@ export default function AdminChallenges() {
                   <td>{ch.category}</td>
                   <td>{ch.point}</td>
                   <td>{ch.max_attempts}</td>
+                  <td><span style={{ color: 'var(--accent)', fontWeight: 600 }}>{ch.solves?.count ?? 0}</span></td>
                   <td>{(ch.flags || []).join(', ')}</td>
                   <td>
                     <button className={`btn btn-sm ${ch.visibility ? 'btn-neon' : 'btn-neon-danger'}`} onClick={() => toggleVisibility(ch._id)}>
                       {ch.visibility ? 'Visible' : 'Hidden'}
+                    </button>
+                  </td>
+                  <td>
+                    <button className={`btn btn-sm ${ch.submission_enabled ? 'btn-neon' : 'btn-neon-danger'}`} onClick={() => toggleSubmission(ch._id)} title={ch.submission_enabled ? 'Click to lock (practice only, no points)' : 'Click to open for points'}>
+                      {ch.submission_enabled ? 'Open' : 'Practice'}
                     </button>
                   </td>
                   <td>
@@ -164,8 +180,8 @@ export default function AdminChallenges() {
                   </td>
                 </tr>
               ))}
-              {!contestId && <tr><td colSpan="8" className="text-center">Select a contest above to view its challenges.</td></tr>}
-              {contestId && challenges.length === 0 && <tr><td colSpan="8" className="text-center">No challenges for this contest.</td></tr>}
+              {!contestId && <tr><td colSpan="10" className="text-center">Select a contest above to view its challenges.</td></tr>}
+              {contestId && challenges.length === 0 && <tr><td colSpan="10" className="text-center">No challenges for this contest.</td></tr>}
             </tbody>
           </table>
         </div>

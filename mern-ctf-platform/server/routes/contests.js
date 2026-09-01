@@ -15,6 +15,7 @@ import { cache } from '../middleware/cache.js';
 import { cacheDel, makeCacheKey } from '../utils/redis.js';
 import { validateObjectId } from '../middleware/validateObjectId.js';
 import { getContestBan, getContestBans, bannedMatchStage } from '../utils/contestBan.js';
+import { notifyBloodIfEarned } from '../utils/discordNotifier.js';
 
 const router = Router();
 
@@ -27,10 +28,7 @@ async function isPreRegAccepted(contestId, userId) {
   const contest = await Contest.findById(contestId).select('pre_registration_enabled startDate');
   if (!contest) return false;
 
-  if (!contest.pre_registration_enabled) {
-    const count = await PreRegistration.countDocuments({ contest_id: contestId });
-    if (count === 0) return true;
-  }
+  if (!contest.pre_registration_enabled) return true;
 
   const reg = await PreRegistration.findOne({ contest_id: contestId, user_id: userId });
   if (!reg) return false;
@@ -92,17 +90,47 @@ router.get('/:id/challenges', verifyToken, async (req, res) => {
       return res.json({ success: true, challenges: {}, user_progress: {} });
     }
 
-    const challengeFilter = { contest_id: req.params.id };
-    if (!isAdmin) challengeFilter.visibility = 1;
+    const challengeFilter = { contest_id: req.params.id, visibility: 1 };
     const challenges = await Challenge.find(challengeFilter).sort({ category: 1 });
+
+    const solveMap = new Map();
+    const solveAgg = await Solve.aggregate([
+      { $match: { contest_id: contest._id } },
+      {
+        $lookup: { from: 'users', localField: 'user_id', foreignField: '_id', as: 'user' },
+      },
+      {
+        $lookup: { from: 'teams', localField: 'team_id', foreignField: '_id', as: 'team' },
+      },
+      {
+        $group: {
+          _id: '$challenge_id',
+          solve_rows: { $sum: 1 },
+          entries: { $push: { user: { $first: '$user.user_name' }, team: { $first: '$team.name' } } },
+        },
+      },
+    ]);
+    for (const s of solveAgg) {
+      const unique = [];
+      const seen = new Set();
+      for (const e of s.entries) {
+        const name = (e.team || e.user || '').toString().trim();
+        if (!name || seen.has(name)) continue;
+        seen.add(name);
+        unique.push(name);
+      }
+      solveMap.set(s._id.toString(), { count: s.solve_rows, solvers: unique });
+    }
+
     const grouped = {};
     for (const ch of challenges) {
       if (!grouped[ch.category]) grouped[ch.category] = [];
-      grouped[ch.category].push(ch);
+      const sol = solveMap.get(ch._id.toString()) || { count: 0, solvers: [] };
+      grouped[ch.category].push({ ...ch.toObject(), solves: sol });
     }
 
     const submissions = await Submission.aggregate([
-      { $match: { user_id: new mongoose.Types.ObjectId(req.user.user_id), contest_id: contest._id } },
+      { $match: { user_id: new mongoose.Types.ObjectId(req.user.user_id), contest_id: contest._id, practice: { $ne: true } } },
       {
         $group: {
           _id: '$challenge_id',
@@ -131,6 +159,22 @@ router.get('/:id/challenges', verifyToken, async (req, res) => {
 
 router.get('/:id/categories', verifyToken, async (req, res) => {
   try {
+    const contest = await Contest.findById(req.params.id);
+    if (!contest) return res.status(404).json({ success: false, error: 'Contest not found.' });
+
+    if (await getContestBan(req.params.id, req.user.user_id)) {
+      return res.status(403).json({ success: false, error: 'You are banned from this contest.' });
+    }
+
+    const isAdmin = req.user.role === 0 || req.user.role === 2;
+    if (contest.paused && !isAdmin) {
+      return res.json({ success: true, categories: [] });
+    }
+
+    if (!(await isPreRegAccepted(req.params.id, req.user.user_id))) {
+      return res.json({ success: true, categories: [] });
+    }
+
     const categories = await Challenge.distinct('category', { contest_id: req.params.id, visibility: 1 });
     res.json({ success: true, categories });
   } catch (err) {
@@ -143,6 +187,10 @@ router.post('/:id/submit', verifyToken, async (req, res) => {
     const { submitted_flag, challenge_id } = req.body;
     const user_id = req.user.user_id;
     const contestId = req.params.id;
+
+    if (!mongoose.Types.ObjectId.isValid(challenge_id)) {
+      return res.json({ success: false, submission_type: 'blank', message: 'Invalid challenge.' });
+    }
 
     const contest = await Contest.findById(contestId);
     if (!contest) return res.json({ success: false, submission_type: 'blank', message: 'Contest not found.' });
@@ -176,10 +224,12 @@ router.post('/:id/submit', verifyToken, async (req, res) => {
     }
 
     let team_id = null;
+    let team_name = null;
     if (contest.participation_mode === 'team') {
       const team = await Team.findOne({ contest_id: contestId, members: user_id });
       if (!team) return res.json({ success: false, submission_type: 'blank', message: 'You must be in a team to submit in this contest.' });
       team_id = team._id;
+      team_name = team.name;
     }
 
     const challenge = await Challenge.findOne({ _id: challenge_id, contest_id: contestId });
@@ -187,20 +237,27 @@ router.post('/:id/submit', verifyToken, async (req, res) => {
       return res.json({ success: false, submission_type: 'blank', message: 'Challenge not found.' });
     }
 
+    if (challenge.visibility !== 1) {
+      return res.json({ success: false, submission_type: 'blank', message: 'Challenge not found.' });
+    }
+
+    const isPractice = challenge.submission_enabled === 0;
+
     const subFilter = { challenge_id, contest_id: contestId };
     if (team_id) subFilter.team_id = team_id;
     else subFilter.user_id = user_id;
 
     const userSubs = await Submission.find(subFilter);
-    const totalSubmissions = userSubs.length;
-    const solved = userSubs.some(s => s.submission_type === 'correct');
+    const scoredSubs = userSubs.filter(s => !s.practice);
 
-    if (solved) {
-      return res.json({ success: false, submission_type: 'already_solved', message: 'This challenge is already solved.' });
-    }
-
-    if (totalSubmissions >= challenge.max_attempts) {
-      return res.json({ success: false, submission_type: 'blank', message: 'No remaining attempts.' });
+    if (!isPractice) {
+      const solved = scoredSubs.some(s => s.submission_type === 'correct');
+      if (solved) {
+        return res.json({ success: false, submission_type: 'already_solved', message: 'This challenge is already solved.' });
+      }
+      if (scoredSubs.length >= challenge.max_attempts) {
+        return res.json({ success: false, submission_type: 'blank', message: 'No remaining attempts.' });
+      }
     }
 
     const flags = await Flag.find({ challenge_id });
@@ -218,11 +275,12 @@ router.post('/:id/submit', verifyToken, async (req, res) => {
       user_id,
       team_id,
       submission_type,
+      practice: isPractice,
     });
 
-    let responseMessage = 'Wrong Flag';
+    let responseMessage = isPractice ? 'Wrong Flag (practice — no points affected)' : 'Wrong Flag';
 
-    if (submission_type === 'correct') {
+    if (submission_type === 'correct' && !isPractice) {
       try {
         const solveData = {
           submission_id: submission._id,
@@ -233,16 +291,25 @@ router.post('/:id/submit', verifyToken, async (req, res) => {
         };
         if (team_id) solveData.team_id = team_id;
         await Solve.create(solveData);
+        notifyBloodIfEarned(contestId, challenge_id, {
+          solver_name: team_name || req.user?.user_name || 'Anonymous',
+          contest_title: contest.title,
+        });
         responseMessage = 'Correct flag! Challenge solved.';
       } catch (solveErr) {
         console.error('Solve create error:', solveErr.message, solveErr.code, JSON.stringify(solveErr.keyValue || {}));
+        if (solveErr.code === 11000) {
+          return res.json({ success: false, submission_type: 'already_solved', message: 'This challenge is already solved.' });
+        }
       }
+    } else if (submission_type === 'correct' && isPractice) {
+      responseMessage = 'Correct flag! (practice — no points awarded)';
     }
 
     await cacheDel(makeCacheKey(`/api/contests/${contestId}/scoreboard*`));
     await cacheDel(makeCacheKey(`/api/contests/${contestId}/scoreboard/timeline*`));
 
-    res.json({ success: true, submission_type, message: responseMessage });
+    res.json({ success: true, submission_type, practice: isPractice, message: responseMessage });
   } catch (err) {
     console.error('Submit error:', err.message, err.stack);
     res.status(500).json({ success: false, submission_type: 'blank', message: 'Server error.' });
@@ -400,6 +467,15 @@ router.post('/:contestId/hints/:hintId/reveal', verifyToken, async (req, res) =>
       return res.status(403).json({ success: false, error: 'You are banned from this contest.' });
     }
 
+    if (contest.startDate && new Date() < new Date(contest.startDate)) {
+      return res.status(403).json({ success: false, error: 'Contest has not started.' });
+    }
+
+    const hintChallenge = await Challenge.findOne({ _id: hint.challenge_id, contest_id: contest._id });
+    if (!hintChallenge || hintChallenge.visibility !== 1) {
+      return res.status(404).json({ success: false, error: 'Hint not found.' });
+    }
+
     let user_id = null, team_id = null;
     if (contest.participation_mode === 'team') {
       const team = await Team.findOne({ contest_id: contest._id, members: req.user.user_id });
@@ -441,6 +517,19 @@ router.get('/:contestId/challenges/:challengeId/hints', verifyToken, async (req,
     if (contest.startDate && new Date() < new Date(contest.startDate))
       return res.status(403).json({ success: false, error: 'Contest has not started.' });
 
+    if (contest.paused && req.user.role !== 0 && req.user.role !== 2) {
+      return res.status(403).json({ success: false, error: 'Contest is paused.' });
+    }
+
+    if (!(await isPreRegAccepted(req.params.contestId, req.user.user_id))) {
+      return res.status(403).json({ success: false, error: 'Your pre-registration has not been accepted yet.' });
+    }
+
+    const challenge = await Challenge.findOne({ _id: req.params.challengeId, contest_id: contest._id });
+    if (!challenge || challenge.visibility !== 1) {
+      return res.status(404).json({ success: false, error: 'Challenge not found.' });
+    }
+
     const hints = await Hint.find({ challenge_id: req.params.challengeId }).sort({ cost: 1 });
     const cheapHints = hints.filter(h => h.cost === 0);
     const paidHints = hints.filter(h => h.cost > 0);
@@ -458,7 +547,13 @@ router.get('/:contestId/challenges/:challengeId/hints', verifyToken, async (req,
       revealedIds = reveals.map(r => r.hint_id.toString());
     }
 
-    res.json({ success: true, hints: cheapHints, paid_hints: paidHints, revealed_ids: revealedIds });
+    const visiblePaidHints = paidHints.map(h => {
+      const obj = h.toObject();
+      if (!revealedIds.includes(h._id.toString())) obj.content = null;
+      return obj;
+    });
+
+    res.json({ success: true, hints: cheapHints, paid_hints: visiblePaidHints, revealed_ids: revealedIds });
   } catch (err) {
     res.status(500).json({ success: false, error: 'Server error.' });
   }
@@ -559,29 +654,46 @@ router.get('/:id/scoreboard/timeline', optionalAuth, async (req, res) => {
       );
     }
 
+    const revealField = contest.participation_mode === 'team' ? '$team_id' : '$user_id';
+    pipeline.push({
+      $lookup: {
+        from: 'hintreveals',
+        let: { gid: '$_id' },
+        pipeline: [
+          { $match: { $expr: { $eq: [revealField, '$$gid'] } } },
+          { $sort: { createdAt: 1 } },
+        ],
+        as: 'reveals',
+      },
+    });
+
     const raw = await Solve.aggregate(pipeline);
 
-    const timeline = await Promise.all(raw.map(async entry => {
-      const sorted = entry.data.sort((a, b) => new Date(a.time) - new Date(b.time));
-      const revealField = contest.participation_mode === 'team' ? 'team_id' : 'user_id';
-      const reveals = await HintReveal.find({ contest_id: contest._id, [revealField]: entry._id })
-        .sort({ createdAt: 1 })
-        .lean();
+    const timeline = raw.map(entry => {
+      const sorted = (entry.data || []).sort((a, b) => new Date(a.time) - new Date(b.time));
       const events = [
         ...sorted.map(d => ({ time: new Date(d.time), delta: d.score })),
-        ...reveals.map(r => ({ time: new Date(r.createdAt), delta: -r.cost })),
+        ...(entry.reveals || []).map(r => ({ time: new Date(r.createdAt), delta: -r.cost })),
       ].sort((a, b) => a.time - b.time);
       let running = 0;
+      const points = events.map(e => {
+        running += e.delta;
+        return { time: e.time.toISOString(), score: running };
+      });
+      const lastSolveTime = sorted.length ? new Date(sorted[sorted.length - 1].time).getTime() : 0;
       return {
         user_name: entry.user_name,
-        data: events.map(e => {
-          running += e.delta;
-          return { time: e.time.toISOString(), score: running };
-        }),
+        data: points,
+        final_score: points.length ? points[points.length - 1].score : 0,
+        last_solve_time: lastSolveTime,
       };
-    }));
+    });
 
-    const filtered = timeline.filter(e => e.data.length > 0).slice(0, 10);
+    const filtered = timeline
+      .filter(e => e.data.length > 0)
+      .sort((a, b) => b.final_score - a.final_score || a.last_solve_time - b.last_solve_time)
+      .slice(0, 10)
+      .map((entry, idx) => ({ ...entry, rank: idx + 1 }));
 
     res.json({ success: true, timeline: filtered });
   } catch (err) {
@@ -800,14 +912,17 @@ router.get('/:id/submissions', verifyToken, async (req, res) => {
       .limit(limit)
       .lean();
 
+    const isAdmin = req.user.role === 0 || req.user.role === 2;
+
     const data = submissions.map(s => ({
       submission_id: s._id,
       user_name: s.user_id?.user_name,
       challenge_name: s.challenge_id?.name,
       challenge_point: s.challenge_id?.point,
       challenge_id: s.challenge_id?._id,
-      submitted_flag: s.submitted_flag,
+      submitted_flag: isAdmin ? s.submitted_flag : '••••••',
       submission_type: s.submission_type,
+      practice: !!s.practice,
       timestamp_of_submission: s.createdAt,
     }));
 

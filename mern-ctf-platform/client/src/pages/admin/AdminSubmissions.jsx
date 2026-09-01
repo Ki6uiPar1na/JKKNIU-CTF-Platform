@@ -1,11 +1,13 @@
 import { useState, useEffect, useRef } from 'react';
 import api from '../../utils/api';
 import AdminSidebar from '../../components/AdminSidebar';
+import SubmissionDetailsModal from '../../components/SubmissionDetailsModal';
 
 export default function AdminSubmissions() {
   const [data, setData] = useState([]);
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
+  const [detailId, setDetailId] = useState(null);
   const pageRef = useRef(page);
   pageRef.current = page;
 
@@ -51,9 +53,12 @@ export default function AdminSubmissions() {
                   <td>{s.user_name}</td>
                   <td>{s.challenge_name} ({s.challenge_point})</td>
                   <td style={{ maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis' }}>{s.submitted_flag}</td>
-                  <td><span className={`badge ${s.submission_type === 'correct' ? 'bg-success' : 'bg-danger'}`}>{s.submission_type}</span></td>
+                  <td><span className={`badge ${s.submission_type === 'correct' ? 'bg-success' : 'bg-danger'}`}>{s.submission_type}</span>{s.practice && <span className="badge" style={{ background: '#facc15', color: '#000', fontSize: '0.6rem', verticalAlign: 'middle' }}>Practice</span>}</td>
                   <td>
                     <div className="d-flex gap-1">
+                      <button className="btn btn-sm" style={{ color: 'var(--accent)', padding: '0.2rem 0.4rem', fontSize: '0.75rem', border: '1px solid rgba(99,102,241,0.3)', borderRadius: 'var(--radius)' }} onClick={() => setDetailId(s.submission_id)} title="View details">
+                        <i className="fas fa-eye"></i>
+                      </button>
                       <button className="btn btn-sm" style={{ color: 'var(--accent)', padding: '0.2rem 0.4rem', fontSize: '0.75rem', border: '1px solid rgba(99,102,241,0.3)', borderRadius: 'var(--radius)' }} onClick={() => handleToggle(s.submission_id)} title="Toggle correct/incorrect">
                         <i className="fas fa-exchange-alt"></i>
                       </button>
@@ -77,6 +82,7 @@ export default function AdminSubmissions() {
           </div>
         )}
       </div>
+      {detailId && <SubmissionDetailsModal submissionId={detailId} onClose={() => setDetailId(null)} />}
     </div>
   );
 }

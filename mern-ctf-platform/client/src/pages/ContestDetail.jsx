@@ -16,6 +16,7 @@ function ChallengeModal({ challenge, userProgress, onClose, onSubmit }) {
   const [hintsLoading, setHintsLoading] = useState(false);
   const [revealing, setRevealing] = useState(null);
   const { showToast } = useToast();
+  const [activeTab, setActiveTab] = useState('overview');
 
   useEffect(() => {
     const contestId = window.location.pathname.split('/')[2];
@@ -71,61 +72,113 @@ function ChallengeModal({ challenge, userProgress, onClose, onSubmit }) {
               <span className="badge" style={{ background: 'rgba(255,255,255,0.04)', color: 'var(--text-secondary)', border: '1px solid rgba(255,255,255,0.06)' }}>
                 <i className="fas fa-tag me-1"></i>{challenge.category}
               </span>
+              <span className="badge" style={{ background: 'rgba(74,222,128,0.1)', color: '#4ade80', border: '1px solid rgba(74,222,128,0.25)' }} title="Total solves">
+                <i className="fas fa-user-check me-1"></i>{challenge.solves?.count ?? 0} solve{(challenge.solves?.count ?? 0) !== 1 ? 's' : ''}
+              </span>
             </div>
-            <div className="mb-4" style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', lineHeight: '1.7', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}
-              dangerouslySetInnerHTML={{ __html: sanitize(challenge.description) }} />
 
-            {challenge.files && challenge.files.length > 0 && (
-              <div className="mb-4">
-                <h6 className="fw-bold mb-2"><i className="fas fa-paperclip me-2" style={{ color: 'var(--accent)' }}></i>Attachments</h6>
-                <div className="d-flex flex-wrap gap-2">
-                  {challenge.files.map((f, i) => (
-                    <a key={i} href={f} download className="btn btn-neon-outline btn-sm" style={{ fontSize: '0.8rem' }}>
-                      <i className="fas fa-download me-1"></i>{f.split('/').pop()}
-                    </a>
-                  ))}
+            <ul className="nav nav-tabs mb-3" style={{ borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
+              <li className="nav-item">
+                <button type="button" className={`nav-link ${activeTab === 'overview' ? 'active' : ''}`} onClick={() => setActiveTab('overview')}
+                  style={{ color: activeTab === 'overview' ? 'var(--accent)' : 'var(--text-secondary)', fontSize: '0.85rem' }}>
+                  <i className="fas fa-book me-1"></i>Overview
+                </button>
+              </li>
+              <li className="nav-item">
+                <button type="button" className={`nav-link ${activeTab === 'solvers' ? 'active' : ''}`} onClick={() => setActiveTab('solvers')}
+                  style={{ color: activeTab === 'solvers' ? 'var(--accent)' : 'var(--text-secondary)', fontSize: '0.85rem' }}>
+                  <i className="fas fa-users me-1"></i>Solvers
+                </button>
+              </li>
+            </ul>
+
+            {activeTab === 'solvers' ? (
+              <div>
+                <div className="mb-3 d-flex align-items-center gap-2" style={{ color: '#4ade80', fontWeight: 600 }}>
+                  <i className="fas fa-trophy"></i>
+                  {challenge.solves?.count ?? 0} solve{(challenge.solves?.count ?? 0) !== 1 ? 's' : ''} on this challenge
                 </div>
-              </div>
-            )}
-
-            {hasHints && (
-              <div className="mb-4">
-                <h6 className="fw-bold mb-2"><i className="fas fa-lightbulb me-2" style={{ color: '#facc15' }}></i>Hints</h6>
-                {hintsLoading ? <div className="spinner-neon" style={{ height: '24px' }}></div> : allHints.map(h => (
-                  <div key={h._id} className="mb-2 p-2" style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 'var(--radius)', borderLeft: '3px solid #facc15' }}>
-                    {h.cost === 0 || revealed[h._id] ? (
-                      <span style={{ fontSize: '0.85rem' }}>{h.content}</span>
-                    ) : (
-                      <div className="d-flex justify-content-between align-items-center">
-                        <span style={{ color: 'var(--text-muted)', fontSize: '0.85rem', fontStyle: 'italic' }}>Hint costs {h.cost} pts to reveal</span>
-                        <button className="btn btn-neon-outline btn-sm py-0 px-2" style={{ fontSize: '0.75rem' }} disabled={revealing === h._id} onClick={() => handleRevealHint(h._id)}>
-                          <i className="fas fa-eye me-1"></i> {revealing === h._id ? 'Revealing...' : `Reveal (${h.cost} pts)`}
-                        </button>
+                {(challenge.solves?.solvers || []).length > 0 ? (
+                  <div style={{ maxHeight: '300px', overflowY: 'auto' }}>
+                    {challenge.solves.solvers.map((name, i) => (
+                      <div key={name} className="p-2 mb-1 d-flex align-items-center gap-2" style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 'var(--radius)' }}>
+                        <span style={{ color: 'var(--accent)', fontSize: '0.8rem', width: '22px' }}>{i + 1}.</span>
+                        <i className="fas fa-user" style={{ color: 'var(--text-secondary)' }}></i>
+                        <span style={{ fontSize: '0.9rem' }}>{name}</span>
                       </div>
-                    )}
-                    <span className={`badge ${h.cost === 0 ? 'bg-success' : 'bg-warning text-dark'} ms-2`} style={{ fontSize: '0.6rem' }}>
-                      {h.cost === 0 ? 'Free' : `${h.cost} pts`}
-                    </span>
+                    ))}
                   </div>
-                ))}
+                ) : (
+                  <p className="text-secondary" style={{ fontSize: '0.9rem' }}>No one has solved this challenge yet. Be the first!</p>
+                )}
               </div>
-            )}
+            ) : (
+              <>
+                <div className="mb-4" style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', lineHeight: '1.7', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}
+                  dangerouslySetInnerHTML={{ __html: sanitize(challenge.description) }} />
 
-            <div className="mb-3">
-              <label className="form-label"><i className="fas fa-flag me-1"></i>Submit Flag</label>
-              <input type="text" className="form-control" value={flag} onChange={e => setFlag(e.target.value)} placeholder="FLAG{...}" onKeyDown={e => { if (e.key === 'Enter' && flag.trim()) onSubmit(flag); }} />
-            </div>
-            <div className="d-flex gap-3 flex-wrap small">
-              <span style={{ color: 'var(--text-muted)' }}><i className="fas fa-bomb me-1"></i>Max attempts: {challenge.max_attempts}</span>
-              <span style={{ color: 'var(--text-muted)' }}><i className="fas fa-upload me-1"></i>Submissions: {userProgress[challenge._id]?.total_submissions || 0}</span>
-              <span style={{ color: 'var(--text-muted)' }}><i className="fas fa-shield-alt me-1"></i>Remaining: {userProgress[challenge._id]?.remaining_attempts ?? challenge.max_attempts}</span>
-            </div>
+                {challenge.files && challenge.files.length > 0 && (
+                  <div className="mb-4">
+                    <h6 className="fw-bold mb-2"><i className="fas fa-paperclip me-2" style={{ color: 'var(--accent)' }}></i>Attachments</h6>
+                    <div className="d-flex flex-wrap gap-2">
+                      {challenge.files.map((f, i) => (
+                        <a key={i} href={f} download className="btn btn-neon-outline btn-sm" style={{ fontSize: '0.8rem' }}>
+                          <i className="fas fa-download me-1"></i>{f.split('/').pop()}
+                        </a>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {hasHints && (
+                  <div className="mb-4">
+                    <h6 className="fw-bold mb-2"><i className="fas fa-lightbulb me-2" style={{ color: '#facc15' }}></i>Hints</h6>
+                    {hintsLoading ? <div className="spinner-neon" style={{ height: '24px' }}></div> : allHints.map(h => (
+                      <div key={h._id} className="mb-2 p-2" style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 'var(--radius)', borderLeft: '3px solid #facc15' }}>
+                        {h.cost === 0 || revealed[h._id] ? (
+                          <span style={{ fontSize: '0.85rem' }}>{h.content}</span>
+                        ) : (
+                          <div className="d-flex justify-content-between align-items-center">
+                            <span style={{ color: 'var(--text-muted)', fontSize: '0.85rem', fontStyle: 'italic' }}>Hint costs {h.cost} pts to reveal</span>
+                            <button className="btn btn-neon-outline btn-sm py-0 px-2" style={{ fontSize: '0.75rem' }} disabled={revealing === h._id} onClick={() => handleRevealHint(h._id)}>
+                              <i className="fas fa-eye me-1"></i> {revealing === h._id ? 'Revealing...' : `Reveal (${h.cost} pts)`}
+                            </button>
+                          </div>
+                        )}
+                        <span className={`badge ${h.cost === 0 ? 'bg-success' : 'bg-warning text-dark'} ms-2`} style={{ fontSize: '0.6rem' }}>
+                          {h.cost === 0 ? 'Free' : `${h.cost} pts`}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {challenge.submission_enabled === 0 && (
+                  <div className="alert alert-warning py-2 mb-3" role="alert">
+                    <i className="fas fa-dumbbell me-2"></i><strong>Practice mode.</strong> This challenge is locked for points — you can still test your flag here, but no points will be awarded.
+                  </div>
+                )}
+                <div className="mb-3">
+                  <label className="form-label"><i className="fas fa-flag me-1"></i>Submit Flag</label>
+                  <input type="text" className="form-control" value={flag} onChange={e => setFlag(e.target.value)} placeholder="FLAG{...}" onKeyDown={e => { if (e.key === 'Enter' && flag.trim()) onSubmit(flag); }} />
+                </div>
+                <div className="d-flex gap-3 flex-wrap small">
+                  <span style={{ color: 'var(--text-muted)' }}><i className="fas fa-bomb me-1"></i>Max attempts: {challenge.submission_enabled === 0 ? 'Unlimited (practice)' : challenge.max_attempts}</span>
+                  <span style={{ color: 'var(--text-muted)' }}><i className="fas fa-upload me-1"></i>Submissions: {userProgress[challenge._id]?.total_submissions || 0}</span>
+                  {challenge.submission_enabled === 1 && (
+                    <span style={{ color: 'var(--text-muted)' }}><i className="fas fa-shield-alt me-1"></i>Remaining: {userProgress[challenge._id]?.remaining_attempts ?? challenge.max_attempts}</span>
+                  )}
+                </div>
+              </>
+            )}
           </div>
           <div className="modal-footer">
             <button className="btn btn-neon-outline btn-sm" onClick={onClose}>Cancel</button>
-            <button className="btn btn-neon btn-sm" onClick={() => onSubmit(flag)} disabled={!flag.trim() || userProgress[challenge._id]?.remaining_attempts === 0}>
-              <i className="fas fa-paper-plane me-1"></i> Submit
-            </button>
+            {activeTab === 'overview' && (
+              <button className="btn btn-neon btn-sm" onClick={() => onSubmit(flag)} disabled={!flag.trim() || (challenge.submission_enabled === 1 && userProgress[challenge._id]?.remaining_attempts === 0)}>
+                <i className="fas fa-paper-plane me-1"></i> Submit
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -147,6 +200,7 @@ export default function ContestDetail() {
   const [scoreboardHidden, setScoreboardHidden] = useState(false);
   const [scoreboardFrozen, setScoreboardFrozen] = useState(false);
   const [filter, setFilter] = useState('all');
+  const [solveFilter, setSolveFilter] = useState('all');
   const [tab, setTab] = useState(
     searchParams.get('tab') === 'scoreboard' ? 'scoreboard'
     : searchParams.get('tab') === 'submissions' ? 'submissions'
@@ -237,7 +291,11 @@ export default function ContestDetail() {
         api.get(`/contests/${id}/challenges`),
         api.get(`/contests/${id}/categories`),
       ]);
-      setChallenges(chRes.data.challenges);
+      setChallenges(
+        Object.fromEntries(
+          Object.entries(chRes.data.challenges).map(([cat, chs]) => [cat, chs.filter(c => c.visibility === 1)])
+        )
+      );
       setUserProgress(chRes.data.user_progress);
       setCategories(catRes.data.categories);
     } catch { showToast('Failed to load challenges', 'error'); }
@@ -422,7 +480,7 @@ export default function ContestDetail() {
       });
       const d = res.data;
       showToast(d.message, d.submission_type !== 'incorrect' ? 'success' : 'error');
-      if (d.submission_type === 'correct') { playSuccessSound(); setModal(null); loadChallenges(); loadScoreboard(); }
+      if (d.submission_type === 'correct' && !d.practice) { playSuccessSound(); setModal(null); loadChallenges(); loadScoreboard(); }
       else if (d.success) { loadChallenges(); }
     } catch (err) {
       showToast(err.response?.data?.message || 'Error submitting flag', 'error');
@@ -892,7 +950,7 @@ export default function ContestDetail() {
                         <td>{s.user_name}</td>
                         <td>{s.challenge_name} ({s.challenge_point})</td>
                         <td style={{ maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis' }}>{s.submitted_flag}</td>
-                        <td><span className={`badge ${s.submission_type === 'correct' ? 'bg-success' : 'bg-danger'}`}>{s.submission_type}</span></td>
+                        <td><span className={`badge ${s.submission_type === 'correct' ? 'bg-success' : 'bg-danger'}`}>{s.submission_type}</span>{s.practice && <span className="badge" style={{ background: '#facc15', color: '#000', fontSize: '0.6rem', verticalAlign: 'middle' }}>Practice</span>}</td>
                         {isSubAdmin && (
                           <td>
                             <div className="d-flex gap-1">
@@ -1066,11 +1124,32 @@ export default function ContestDetail() {
           );
         }
 
+        const visibleGroups = Object.entries(challenges)
+          .filter(([cat]) => filter === 'all' || filter === cat)
+          .map(([category, chs]) => {
+            const list = solveFilter === 'all'
+              ? chs
+              : chs.filter(c => solveFilter === 'open' ? c.submission_enabled !== 0 : c.submission_enabled === 0);
+            return [category, list];
+          })
+          .filter(([, list]) => list.length > 0);
+
         const challengeContent = (
           <>
             {contestStatus === 'archived' && (
               <div className="alert alert-secondary py-2"><i className="fas fa-info-circle me-1"></i>This contest has ended. Challenges are in read-only mode.</div>
             )}
+            <div className="d-flex gap-2 mb-2 flex-wrap">
+              <button className={`filter-link btn text-start ${solveFilter === 'all' ? 'active' : ''}`} onClick={() => setSolveFilter('all')} style={{ width: 'auto' }}>
+                <i className="fas fa-layer-group me-1"></i>All
+              </button>
+              <button className={`filter-link btn text-start ${solveFilter === 'open' ? 'active' : ''}`} onClick={() => setSolveFilter('open')} style={{ width: 'auto' }}>
+                <i className="fas fa-lock-open me-1" style={{ color: '#4ade80' }}></i>Open to solve
+              </button>
+              <button className={`filter-link btn text-start ${solveFilter === 'locked' ? 'active' : ''}`} onClick={() => setSolveFilter('locked')} style={{ width: 'auto' }}>
+                <i className="fas fa-dumbbell me-1" style={{ color: '#facc15' }}></i>Practice
+              </button>
+            </div>
             <div className="d-flex gap-2 mb-4 flex-wrap">
               <button className={`filter-link btn text-start ${filter === 'all' ? 'active' : ''}`} onClick={() => setFilter('all')} style={{ width: 'auto' }}>
                 <i className="fas fa-th-list me-1"></i>All
@@ -1081,13 +1160,13 @@ export default function ContestDetail() {
                 </button>
               ))}
             </div>
-            {Object.entries(challenges).filter(([cat]) => filter === 'all' || filter === cat).length === 0 ? (
+            {visibleGroups.length === 0 ? (
               <div className="text-center py-5">
                 <i className="fas fa-puzzle-piece" style={{ fontSize: '2.5rem', color: 'var(--text-muted)' }}></i>
                 <p className="mt-3 text-secondary">No challenges available yet.</p>
               </div>
             ) : (
-              Object.entries(challenges).filter(([cat]) => filter === 'all' || filter === cat).map(([category, chs]) => (
+              visibleGroups.map(([category, chs]) => (
                 <div key={category} className="mb-4">
                   <h3 className="category-title d-flex align-items-center gap-2">
                     <span style={{ display: 'inline-block', width: '10px', height: '10px', borderRadius: '50%', background: getCategoryColor(category) }}></span>
@@ -1116,6 +1195,12 @@ export default function ContestDetail() {
                                   <i className={`fas ${ch.visibility === 0 ? 'fa-eye-slash' : 'fa-eye'}`}></i>
                                 </button>
                                 <button className="btn btn-sm"
+                                  style={{ padding: '0.15rem 0.35rem', fontSize: '0.65rem', border: `1px solid ${ch.submission_enabled === 0 ? 'rgba(248,113,113,0.5)' : 'rgba(34,197,94,0.4)'}`, borderRadius: 'var(--radius)', color: ch.submission_enabled === 0 ? '#f87171' : '#4ade80', background: ch.submission_enabled === 0 ? 'rgba(248,113,113,0.1)' : 'rgba(34,197,94,0.1)' }}
+                                  onClick={async () => { try { await api.put(`/admin/challenges/${ch._id}/toggle-submission`); loadChallenges(); } catch {} }}
+                                  title={ch.submission_enabled === 0 ? 'Practice (locked) — click to open for points' : 'Open — click to lock (practice only)'}>
+                                  <i className={`fas ${ch.submission_enabled === 0 ? 'fa-lock' : 'fa-lock-open'}`}></i>
+                                </button>
+                                <button className="btn btn-sm"
                                   style={{ padding: '0.15rem 0.35rem', fontSize: '0.65rem', border: '1px solid rgba(248,113,113,0.3)', borderRadius: 'var(--radius)', color: '#f87171' }}
                                   onClick={async () => { if (!confirm('Delete this challenge?')) return; try { await api.delete(`/admin/challenges/${ch._id}`); loadChallenges(); loadScoreboard(); } catch {} }}
                                   title="Delete challenge">
@@ -1125,6 +1210,7 @@ export default function ContestDetail() {
                             )}
                             <h5>{ch.name}</h5>
                             <div className="points-badge"><i className="fas fa-star"></i> {ch.point} pts</div>
+                            {ch.submission_enabled === 0 && <span style={{ fontSize: '0.75rem', color: '#facc15' }}><i className="fas fa-dumbbell me-1"></i>Practice (no points)</span>}
                             {progress.status === 'solved' && <span style={{ fontSize: '0.75rem', color: '#4ade80' }}><i className="fas fa-check-circle me-1"></i>Solved</span>}
                             {progress.status === 'tried' && <span style={{ fontSize: '0.75rem', color: '#f87171' }}><i className="fas fa-exclamation-circle me-1"></i>Tried</span>}
                           </div>

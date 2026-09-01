@@ -102,6 +102,7 @@ router.get('/:contestId/teams/my', verifyToken, async (req, res) => {
 router.get('/:contestId/teams', verifyToken, async (req, res) => {
   try {
     const teams = await Team.find({ contest_id: req.params.contestId })
+      .select('-invite_code')
       .populate('captain', 'user_name')
       .populate('members', 'user_name');
     res.json({ success: true, teams });
@@ -171,6 +172,9 @@ router.put('/:contestId/teams/captain', verifyToken, async (req, res) => {
 router.post('/:contestId/teams/join-link/:inviteCode', verifyToken, async (req, res) => {
   try {
     const { inviteCode } = req.params;
+    const contest = await Contest.findById(req.params.contestId);
+    if (!contest) return res.status(404).json({ success: false, error: 'Contest not found.' });
+
     const team = await Team.findOne({ invite_code: inviteCode, contest_id: req.params.contestId });
     if (!team) return res.status(400).json({ success: false, error: 'Invalid invite link.' });
 
@@ -185,8 +189,13 @@ router.post('/:contestId/teams/join-link/:inviteCode', verifyToken, async (req, 
     if (inOtherTeam)
       return res.status(400).json({ success: false, error: 'You are already in a team for this contest. Leave it first.' });
 
-    team.members.push(req.user.user_id);
-    await team.save();
+    const updated = await Team.findOneAndUpdate(
+      { _id: team._id, $expr: { $lt: [{ $size: '$members' }, contest.max_team_size] } },
+      { $addToSet: { members: req.user.user_id } },
+      { new: true }
+    );
+    if (!updated) return res.status(400).json({ success: false, error: 'Team is full.' });
+
     res.json({ success: true, message: `Joined ${team.name}!`, team });
   } catch (err) {
     res.status(500).json({ success: false, error: 'Server error.' });
