@@ -15,7 +15,7 @@ import { cache } from '../middleware/cache.js';
 import { cacheDel, makeCacheKey } from '../utils/redis.js';
 import { validateObjectId } from '../middleware/validateObjectId.js';
 import { getContestBan, getContestBans, bannedMatchStage } from '../utils/contestBan.js';
-import { notifyBloodIfEarned } from '../utils/discordNotifier.js';
+import { notifyBloodIfEarned, notifySolve } from '../utils/discordNotifier.js';
 
 const router = Router();
 
@@ -295,6 +295,7 @@ router.post('/:id/submit', verifyToken, async (req, res) => {
           solver_name: team_name || req.user?.user_name || 'Anonymous',
           contest_title: contest.title,
         });
+        notifySolve(contestId, challenge_id, { user_id, team_id });
         responseMessage = 'Correct flag! Challenge solved.';
       } catch (solveErr) {
         console.error('Solve create error:', solveErr.message, solveErr.code, JSON.stringify(solveErr.keyValue || {}));

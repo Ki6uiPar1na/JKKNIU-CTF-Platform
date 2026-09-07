@@ -20,6 +20,7 @@ const platformStatusSchema = new mongoose.Schema({
       ban: { enabled: { type: Boolean, default: false }, webhook_url: { type: String, default: '' } },
       new_contest: { enabled: { type: Boolean, default: false }, webhook_url: { type: String, default: '' } },
       contest_end: { enabled: { type: Boolean, default: false }, webhook_url: { type: String, default: '' } },
+      solve: { enabled: { type: Boolean, default: false }, webhook_url: { type: String, default: '' } },
     },
     default: () => ({
       new_challenge: { enabled: false, webhook_url: '' },
@@ -27,6 +28,7 @@ const platformStatusSchema = new mongoose.Schema({
       ban: { enabled: false, webhook_url: '' },
       new_contest: { enabled: false, webhook_url: '' },
       contest_end: { enabled: false, webhook_url: '' },
+      solve: { enabled: false, webhook_url: '' },
     }),
   },
 }, { timestamps: true });

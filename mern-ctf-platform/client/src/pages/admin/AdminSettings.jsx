@@ -9,9 +9,11 @@ const DISCORD_DEFAULTS = {
   ban: { enabled: false, webhook_url: '' },
   new_contest: { enabled: false, webhook_url: '' },
   contest_end: { enabled: false, webhook_url: '' },
+  solve: { enabled: false, webhook_url: '' },
 };
 
 const DISCORD_EVENTS = [
+  { key: 'solve', icon: 'fa-check-circle', label: 'Every Solve', desc: 'Posted every time a user/team correctly solves a challenge.' },
   { key: 'new_challenge', icon: 'fa-flask', label: 'New Challenge', desc: 'Posted when an admin adds a challenge to a contest.' },
   { key: 'blood', icon: 'fa-trophy', label: '1st / 2nd / 3rd Blood', desc: 'Posted when the first, second, or third user/team solves a challenge.' },
   { key: 'ban', icon: 'fa-ban', label: 'Bans', desc: 'Posted when a user or team is banned from a contest.' },

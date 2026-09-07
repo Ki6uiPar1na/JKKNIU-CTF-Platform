@@ -57,10 +57,7 @@ const challengeStorage = multer.diskStorage({
 });
 
 const challengeFileFilter = (req, file, cb) => {
-  const allowed = ['.zip', '.tar', '.gz', '.xz', '.7z', '.rar', '.pdf', '.txt', '.png', '.jpg', '.jpeg', '.pcap', '.pcapng', '.py', '.js', '.java', '.c', '.cpp', '.go', '.rs', '.rb', '.php', '.html', '.css', '.yaml', '.yml', '.json', '.xml', '.csv', '.sql', '.bin', '.elf', '.wasm'];
-  const ext = path.extname(file.originalname).toLowerCase();
-  if (allowed.includes(ext)) cb(null, true);
-  else cb(new Error('File type not allowed for challenge uploads.'), false);
+  cb(null, true);
 };
 
 export const uploadChallengeFile = multer({

@@ -3,8 +3,10 @@ import PlatformStatus from '../models/PlatformStatus.js';
 import Challenge from '../models/Challenge.js';
 import Contest from '../models/Contest.js';
 import Solve from '../models/Solve.js';
+import User from '../models/User.js';
+import Team from '../models/Team.js';
 
-export const DISCORD_EVENTS = ['new_challenge', 'blood', 'ban', 'new_contest', 'contest_end'];
+export const DISCORD_EVENTS = ['new_challenge', 'blood', 'ban', 'new_contest', 'contest_end', 'solve'];
 
 const WEBHOOK_RE = /^https:\/\/(discord|discordapp)\.com\/api\/webhooks\/[^/]+\/[^/]+$/;
 
@@ -35,10 +37,14 @@ async function sendWebhook(url, payload) {
     });
     if (!res.ok) {
       const text = await res.text().catch(() => '');
-      console.error(`Discord webhook error (${res.status}):`, text.slice(0, 300));
+      const err = new Error(`Discord webhook error (${res.status}): ${text.slice(0, 300)}`);
+      console.error(err.message);
+      err.expose = true;
+      throw err;
     }
   } catch (err) {
     console.error('Discord notification failed:', err.message);
+    throw err;
   } finally {
     clearTimeout(timeout);
   }
@@ -93,6 +99,23 @@ export function buildPayload(event, body, footer) {
           { name: 'Challenge', value: body.challenge_name, inline: true },
           { name: 'Points', value: String(body.challenge_point ?? '—'), inline: true },
           { name: 'Contest', value: body.contest_title || '—' },
+        ],
+        footer_text: footer,
+      });
+    }
+    case 'solve': {
+      const totalSolvers = body.total_solvers ?? '—';
+      const solveCount = typeof totalSolvers === 'number' ? totalSolvers.toLocaleString() : totalSolvers;
+      return makeEmbed({
+        color: 0x2ECC71,
+        title: '✅ Challenge Solved!',
+        description: `**${body.solver_name}** solved **${body.challenge_name}** in **${body.contest_title}**`,
+        fields: [
+          { name: '🏆 Contest', value: body.contest_title || '—', inline: true },
+          { name: '🧩 Challenge', value: body.challenge_name || '—', inline: true },
+          { name: '⭐ Points', value: String(body.challenge_point ?? '—'), inline: true },
+          { name: '👤 Solver', value: body.solver_name || '—', inline: true },
+          { name: '📊 Total Solves', value: solveCount, inline: true },
         ],
         footer_text: footer,
       });
@@ -203,12 +226,90 @@ export async function notifyDiscord(event, body = {}) {
   }
 }
 
+function buildTestPayload(event, footer) {
+  const sample = {
+    new_challenge: () => ({
+      color: 0x5865F2,
+      title: '🔬 New Challenge: Test Challenge',
+      fields: [
+        { name: 'Category', value: 'Web', inline: true },
+        { name: 'Points', value: '100', inline: true },
+        { name: 'Contest', value: 'Test Contest' },
+        { name: 'Max Attempts', value: '5', inline: true },
+        { name: 'Status', value: 'Open for solving', inline: true },
+      ],
+      footer_text: footer,
+    }),
+    blood: () => ({
+      color: 0xFFD700,
+      title: '🥇 First Blood — Test Challenge',
+      description: 'TestSolver took 🥇 First Blood on **Test Challenge** (100 pts).',
+      fields: [
+        { name: 'Solver', value: 'TestSolver', inline: true },
+        { name: 'Challenge', value: 'Test Challenge', inline: true },
+        { name: 'Points', value: '100', inline: true },
+        { name: 'Contest', value: 'Test Contest' },
+      ],
+      footer_text: footer,
+    }),
+    ban: () => ({
+      color: 0xF87171,
+      title: '🚫 Account Banned',
+      description: 'User **TestUser** was banned from **Test Contest**.',
+      fields: [{ name: 'Reason', value: 'Test reason (sample)' }],
+      footer_text: footer,
+    }),
+    new_contest: () => ({
+      color: 0x34D399,
+      title: '📢 New Contest: Test Contest',
+      fields: [
+        { name: 'Mode', value: 'Solo', inline: true },
+        { name: 'Starts', value: 'Test starts', inline: true },
+        { name: 'Ends', value: 'Test ends', inline: true },
+        { name: 'Description', value: 'This is a sample test contest.' },
+      ],
+      footer_text: footer,
+    }),
+    contest_end: () => ({
+      color: 0xF59E0B,
+      title: '🏁 Contest Finished: Test Contest',
+      description: '**Test Contest** has ended. Final standings:',
+      fields: [
+        { name: '🏆 Top 5', value: '1. **PlayerOne** — 500 pts\n2. **PlayerTwo** — 400 pts\n3. **PlayerThree** — 300 pts' },
+      ],
+      footer_text: footer,
+    }),
+    solve: () => ({
+      color: 0x2ECC71,
+      title: '✅ Challenge Solved!',
+      description: '**TestSolver** solved **Test Challenge** in **Test Contest**',
+      fields: [
+        { name: '🏆 Contest', value: 'Test Contest', inline: true },
+        { name: '🧩 Challenge', value: 'Test Challenge', inline: true },
+        { name: '⭐ Points', value: '100', inline: true },
+        { name: '👤 Solver', value: 'TestSolver', inline: true },
+        { name: '📊 Total Solves', value: '12', inline: true },
+      ],
+      footer_text: footer,
+    }),
+  };
+  const builder = sample[event] || (() => ({
+    color: 0x5865F2,
+    title: '✅ Discord Notification Test',
+    description: 'If you can see this, your webhook is configured correctly.',
+    footer_text: footer,
+  }));
+  const embed = builder();
+  embed.timestamp = new Date().toISOString();
+  return embed;
+}
+
 export async function sendDiscordTest(event, url) {
   const webhookUrl = (url && url.trim()) || (await getWebhookUrl(event));
   if (!webhookUrl) throw new Error('No webhook URL configured. Paste a webhook URL and try again.');
   const status = await PlatformStatus.findById('000000000000000000000001');
   const footer = (status?.platform_name || 'CTF Platform') + ' · ' + new Date().toLocaleString();
-  const embed = buildPayload('test', {}, footer);
+  const embed = buildTestPayload(event, footer);
   await sendWebhook(webhookUrl, { embeds: [embed] });
   return true;
 }
@@ -235,5 +336,37 @@ export async function notifyBloodIfEarned(contestId, challengeId, { solver_name,
     });
   } catch (err) {
     console.error('blood notify error:', err.message);
+  }
+}
+
+export async function notifySolve(contestId, challengeId, { user_id, team_id }) {
+  try {
+    const challenge = await Challenge.findById(challengeId).select('name point');
+    if (!challenge) return;
+
+    let solver_name = 'Unknown';
+    if (team_id) {
+      const team = await Team.findById(team_id).select('name');
+      const user = await User.findById(user_id).select('user_name');
+      const teamName = team?.name || 'Unknown';
+      const memberName = user?.user_name || 'Unknown';
+      solver_name = `${teamName} (Member: ${memberName})`;
+    } else {
+      const user = await User.findById(user_id).select('user_name');
+      solver_name = user?.user_name || 'Unknown';
+    }
+
+    const contest = await Contest.findById(contestId).select('title');
+    const totalSolvers = await Solve.countDocuments({ contest_id: contestId, challenge_id: challengeId });
+
+    await notifyDiscord('solve', {
+      solver_name,
+      challenge_name: challenge.name,
+      challenge_point: challenge.point,
+      contest_title: contest?.title || '—',
+      total_solvers: totalSolvers,
+    });
+  } catch (err) {
+    console.error('solve notify error:', err.message);
   }
 }

@@ -27,7 +27,7 @@ import { validateObjectId } from '../middleware/validateObjectId.js';
 
 import { getContestBans, bannedMatchStage } from '../utils/contestBan.js';
 import { storeFile, deleteStoredFile } from '../utils/cloudinary.js';
-import { isValidWebhookUrl, notifyDiscord, getScoreSummary, sendDiscordTest, DISCORD_EVENTS } from '../utils/discordNotifier.js';
+import { isValidWebhookUrl, notifyDiscord, getScoreSummary, sendDiscordTest, DISCORD_EVENTS, notifySolve, notifyBloodIfEarned } from '../utils/discordNotifier.js';
 
 function csvValue(v) {
   const s = String(v ?? '');
@@ -1614,6 +1614,10 @@ router.put('/submissions/:id/toggle', async (req, res) => {
       notifyBloodIfEarned(submission.contest_id, submission.challenge_id, {
         solver_name: solverName || '—',
         contest_title: contestTitle || '—',
+      });
+      notifySolve(submission.contest_id, submission.challenge_id, {
+        user_id: submission.user_id,
+        team_id: submission.team_id || null,
       });
       logAdminAction(req, 'Toggled submission to correct', 'submission', submission._id,
         `Challenge: ${submission.challenge_id}, User: ${submission.user_id}`);

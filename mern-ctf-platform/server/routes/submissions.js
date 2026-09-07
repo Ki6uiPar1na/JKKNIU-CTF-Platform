@@ -10,7 +10,7 @@ import PreRegistration from '../models/PreRegistration.js';
 import { cacheDel, makeCacheKey } from '../utils/redis.js';
 import { verifyToken } from '../middleware/auth.js';
 import { getContestBan } from '../utils/contestBan.js';
-import { notifyBloodIfEarned } from '../utils/discordNotifier.js';
+import { notifyBloodIfEarned, notifySolve } from '../utils/discordNotifier.js';
 
 const router = Router();
 
@@ -134,6 +134,7 @@ router.post('/submit', verifyToken, async (req, res) => {
           solver_name: team_name || req.user?.user_name || 'Anonymous',
           contest_title: contest.title,
         });
+        notifySolve(contestId, challenge_id, { user_id, team_id });
         await cacheDel(makeCacheKey(`/api/contests/${contestId}/scoreboard*`));
         await cacheDel(makeCacheKey(`/api/contests/${contestId}/scoreboard/timeline*`));
       } catch (err) {
