@@ -524,7 +524,7 @@ export default function ContestDetail() {
     if (rank === 1) return '<span style="display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:50%;background:linear-gradient(135deg,#ffd700,#f0a500);color:#5c3a00;font-weight:800;font-size:0.8rem">1</span>';
     if (rank === 2) return '<span style="display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:50%;background:linear-gradient(135deg,#e0e0e0,#b0b0b0);color:#4a4a4a;font-weight:800;font-size:0.8rem">2</span>';
     if (rank === 3) return '<span style="display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:50%;background:linear-gradient(135deg,#e8a87c,#cd7f32);color:#4a2800;font-weight:800;font-size:0.8rem">3</span>';
-    return `<span style="display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:50%;color:var(--text-muted);font-weight:600;font-size:0.8rem">${rank}</span>`;
+    return `<span style="display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:50%;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.12);color:var(--text-secondary);font-weight:700;font-size:0.8rem">${rank}</span>`;
   };
 
   const formatDate = (d) => d ? new Date(d).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'TBD';
@@ -1075,51 +1075,151 @@ export default function ContestDetail() {
         }
 
         if (tab === 'scoreboard') {
-  const isTeamContest = contest.participation_mode === 'team';
-  const canParticipate = user && (!isTeamContest || myTeam);
+          const entryInitials = (name) => {
+            const parts = String(name || '').trim().split(/\s+/).filter(Boolean);
+            const a = parts[0]?.[0] || '';
+            const b = parts.length > 1 ? parts[parts.length - 1][0] : (parts[0]?.[1] || '');
+            return (a + b).toUpperCase();
+          };
+          const entryGradient = (name) => {
+            const h = (String(name || '').split('').reduce((s, c) => s + c.charCodeAt(0), 0)) % 360;
+            return `linear-gradient(135deg, hsl(${h},70%,45%), hsl(${(h + 60) % 360},70%,35%))`;
+          };
+          const saddles = [0, 1, 2].map((idx, posIdx) => scoreboard[idx]).filter(Boolean);
+          const podiumCols = [
+            { pos: 2, no: 3, cls: 'linear-gradient(160deg, #cd7f32, #b0681f)', ph: '3rd' },
+            { pos: 1, no: 2, cls: 'linear-gradient(160deg, #ffd700, #f0a500)', ph: '2nd' },
+            { pos: 0, no: 1, cls: 'linear-gradient(160deg, #ff5f8f, #b23a63)', ph: '1st' },
+          ];
+          const isRowSelf = (entry) => user && (isTeamContest ? entry.user_name === myTeam?.name : entry.user_name === user.user_name);
           return (
             <>
-              {user && (user.role === 0 || user.role === 2) && (
-                <div className="d-flex justify-content-end mb-3">
+              <div className="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+                <div className="d-flex align-items-center gap-2">
+                  <h4 className="section-title mb-0"><i className="fas fa-trophy me-2" style={{ color: 'var(--accent)' }}></i>Live Leaderboard</h4>
+                  {scoreboardFrozen ? (
+                    <span className="badge" style={{ background: 'rgba(99,102,241,0.15)', color: 'var(--accent)', border: '1px solid rgba(99,102,241,0.3)' }}><i className="fas fa-snowflake me-1"></i>Frozen</span>
+                  ) : (
+                    <span className="badge" style={{ background: 'rgba(74,222,128,0.12)', color: '#4ade80', border: '1px solid rgba(74,222,128,0.3)' }}><i className="fas fa-bolt me-1"></i>Live</span>
+                  )}
+                </div>
+                {user && (user.role === 0 || user.role === 2) && (
                   <a href={`/api/admin/scoreboard/${contest._id}/export`} className="btn btn-neon-outline btn-sm" download>
                     <i className="fas fa-download me-1"></i> Export CSV
                   </a>
-                </div>
-              )}
+                )}
+              </div>
+
               <ScoreboardGraph contestId={contest._id} startDate={contest.startDate} endDate={contest.endDate} scoreboardFrozen={scoreboardFrozen} serverNow={now} />
+
               {scoreboardFrozen && (
                 <div className="alert" style={{ background: 'rgba(99,102,241,0.12)', border: '1px solid rgba(99,102,241,0.3)', color: 'var(--accent)', borderRadius: 'var(--radius)' }}>
-                  <i className="fas fa-snowflake me-2"></i>Scoreboard is frozen. Rankings reflect the state as of the freeze time.
+                  <i className="fas fa-snowflake me-2"></i>Scoreboard is frozen. Final rankings reflect the state as of the freeze time <span className="fw-bold">&mdash; no further solves count.</span>
                 </div>
               )}
-              <div className="neon-card p-0" style={{ overflow: 'hidden' }}>
-              <div className="table-responsive">
-                <table className="neon-table" style={{ marginBottom: 0, border: 'none' }}>
-                  <thead>
-                    <tr style={{ background: 'rgba(255,255,255,0.03)' }}>
-                      <th style={{ width: '60px', padding: '0.85rem 1rem', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>#</th>
-                      <th style={{ padding: '0.85rem 1rem', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>{isTeamContest ? 'Team' : 'User'}</th>
-                      <th style={{ width: '90px', padding: '0.85rem 1rem', textAlign: 'right', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>Score</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {scoreboardHidden ? (
-                      <tr><td colSpan="3" className="text-center py-4" style={{ color: 'var(--text-muted)' }}><i className="fas fa-eye-slash me-2"></i>Scoreboard is hidden for this contest.</td></tr>
-                    ) : scoreboard.length === 0 ? (
-                      <tr><td colSpan="3" className="text-center py-4" style={{ color: 'var(--text-muted)' }}>No scores yet.</td></tr>
-                    ) : (
-                      scoreboard.map((entry, i) => (
-                        <tr key={entry.rank} style={{ borderBottom: i < scoreboard.length - 1 ? '1px solid rgba(255,255,255,0.04)' : 'none' }}>
-                          <td style={{ padding: '0.7rem 1rem' }} dangerouslySetInnerHTML={{ __html: getMedal(entry.rank) }} />
-                          <td className="fw-bold" style={{ padding: '0.7rem 1rem', color: 'var(--text-primary)' }}>{entry.user_name}</td>
-                          <td className="fw-bold" style={{ padding: '0.7rem 1rem', textAlign: 'right', color: entry.rank <= 3 ? 'var(--accent)' : 'var(--text-secondary)', fontSize: '1rem' }}>{entry.total_score}</td>
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </div>
+
+              {scoreboardHidden ? (
+                <div className="neon-card text-center py-5">
+                  <div style={{ width: 70, height: 70, margin: '0 auto', borderRadius: '50%', background: 'rgba(255,255,255,0.04)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <i className="fas fa-eye-slash" style={{ fontSize: '1.6rem', color: 'var(--text-muted)' }}></i>
+                  </div>
+                  <h5 className="mt-3 mb-1">Scoreboard Hidden</h5>
+                  <p className="mb-0 text-secondary px-3">This contest's leaderboard is hidden. Standings are not visible to participants.</p>
+                </div>
+              ) : scoreboard.length === 0 ? (
+                <div className="neon-card text-center py-5">
+                  <div style={{ width: 70, height: 70, margin: '0 auto', borderRadius: '50%', background: 'rgba(255,255,255,0.04)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <i className="fas fa-chart-line" style={{ fontSize: '1.6rem', color: 'var(--text-muted)' }}></i>
+                  </div>
+                  <h5 className="mt-3 mb-1">No Solves Yet</h5>
+                  <p className="mb-0 text-secondary px-3">Be the first to solve a challenge and claim the top spot.</p>
+                </div>
+              ) : (
+                <>
+                  {!scoreboardHidden && saddles.length > 0 && (
+                    <div className="mb-4 d-flex justify-content-center align-items-end" style={{ gap: '0.75rem' }}>
+                        {podiumCols.map(({ pos, no, cls, ph }) => {
+                          const e = saddles[pos];
+                          const selfMark = e && isRowSelf(e);
+                          return (
+                            <div key={no} className="text-center" style={{ flex: '0 0 30%', minWidth: 120 }}>
+                              <div className="mx-auto mb-2" style={{
+                                width: 56, height: 56, borderRadius: '50%',
+                                background: cls,
+                                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                color: '#fff', fontWeight: 800, fontSize: '1.15rem',
+                                boxShadow: `0 8px 24px ${cls.includes('ffd700') ? 'rgba(255,215,0,0.35)' : cls.includes('ff5f8f') ? 'rgba(255,95,143,0.35)' : 'rgba(205,127,50,0.35)'}`,
+                                position: 'relative'
+                              }}>
+                                {e ? e.rank : ph}
+                                {e && selfMark && (
+                                  <span title="You" style={{ position: 'absolute', bottom: -2, right: -2, width: 18, height: 18, borderRadius: '50%', background: 'var(--accent)', color: '#fff', fontSize: '0.6rem', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '2px solid #0b0e1a' }}><i className="fas fa-user"></i></span>
+                                )}
+                              </div>
+                              <div className="fw-bold mb-1" style={{ color: 'var(--accent)', fontSize: '0.85rem' }}>{isTeamContest ? 'Team' : 'User'}</div>
+                              <div className="fw-bold" style={{ color: 'var(--text-primary)', fontSize: '0.95rem', maxWidth: 130, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', margin: '0 auto' }}>{e ? e.user_name : ''}</div>
+                              <div className="small" style={{ color: 'var(--accent)', fontWeight: 700 }}>{e ? e.total_score + ' pts' : ''}</div>
+                            </div>
+                          );
+                        })}
+                    </div>
+                  )}
+
+                  <div className="neon-card p-0" style={{ overflow: 'hidden' }}>
+                    <div className="table-responsive">
+                      <table className="neon-table" style={{ marginBottom: 0, border: 'none' }}>
+                          <thead>
+                            <tr style={{ background: 'rgba(255,255,255,0.03)' }}>
+                              <th style={{ width: '52px', textAlign: 'center', padding: '0.85rem 0.75rem', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>#</th>
+                              <th style={{ padding: '0.85rem 1rem', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>{isTeamContest ? 'Team' : 'User'}</th>
+                              <th style={{ width: '110px', padding: '0.85rem 1rem', textAlign: 'right', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>Score</th>
+                            </tr>
+                          </thead>
+                        <tbody>
+                          {scoreboard.map((entry, i) => {
+                            const selfMark = isRowSelf(entry);
+                            return (
+                              <tr key={entry.rank} style={{
+                                borderBottom: i < scoreboard.length - 1 ? '1px solid rgba(255,255,255,0.04)' : 'none',
+                                background: selfMark ? 'rgba(99,102,241,0.10)' : 'transparent',
+                                borderLeft: selfMark ? '3px solid var(--accent)' : '3px solid transparent'
+                              }}>
+                                <td style={{ padding: '0.6rem 1rem', textAlign: 'center' }}>
+                                  <span style={{ display: 'inline-flex', flexShrink: 0 }} dangerouslySetInnerHTML={{ __html: getMedal(entry.rank) }} />
+                                </td>
+                                <td style={{ padding: '0.6rem 1rem' }}>
+                                  <span className="fw-bold" style={{ color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 200 }}>
+                                    {entry.user_name}
+                                    {selfMark && <span className="ms-2 badge" style={{ background: 'var(--accent)', fontSize: '0.6rem' }}>You</span>}
+                                  </span>
+                                </td>
+                                <td className="fw-bold" style={{ padding: '0.7rem 1rem', textAlign: 'right', color: entry.rank <= 3 ? 'var(--accent)' : 'var(--text-secondary)', fontSize: '1rem' }}>
+                                  {entry.total_score.toLocaleString()}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  {myEntry && (
+                    <div className="mt-3 neon-card p-3">
+                      <div className="d-flex align-items-center justify-content-between flex-wrap gap-2">
+                        <div className="d-flex align-items-center gap-2">
+                          <i className="fas fa-user-check" style={{ color: 'var(--accent)' }}></i>
+                          <span className="fw-bold" style={{ color: 'var(--text-primary)' }}>Your Standing</span>
+                        </div>
+                        <div className="d-flex align-items-center gap-3">
+                          <span className="fw-bold" style={{ color: isTeamContest ? 'var(--accent)' : 'var(--accent)' }}>#{myEntry.rank}</span>
+                          <span className="fw-bold" style={{ color: 'var(--text-secondary)' }}>{myEntry.total_score.toLocaleString()} pts</span>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
             </>
           );
         }
