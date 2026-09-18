@@ -4,7 +4,7 @@ import { sanitize } from '../utils/sanitize';
 import api from '../utils/api';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../components/Toast';
-import ScoreboardGraph from '../components/ScoreboardGraph';
+import ScoreboardGrid from '../components/ScoreboardGrid';
 import { playSuccessSound, playNotificationSound } from '../utils/sound';
 import useServerTime from '../hooks/useServerTime';
 
@@ -1075,23 +1075,6 @@ export default function ContestDetail() {
         }
 
         if (tab === 'scoreboard') {
-          const entryInitials = (name) => {
-            const parts = String(name || '').trim().split(/\s+/).filter(Boolean);
-            const a = parts[0]?.[0] || '';
-            const b = parts.length > 1 ? parts[parts.length - 1][0] : (parts[0]?.[1] || '');
-            return (a + b).toUpperCase();
-          };
-          const entryGradient = (name) => {
-            const h = (String(name || '').split('').reduce((s, c) => s + c.charCodeAt(0), 0)) % 360;
-            return `linear-gradient(135deg, hsl(${h},70%,45%), hsl(${(h + 60) % 360},70%,35%))`;
-          };
-          const saddles = [0, 1, 2].map((idx, posIdx) => scoreboard[idx]).filter(Boolean);
-          const podiumCols = [
-            { pos: 2, no: 3, cls: 'linear-gradient(160deg, #cd7f32, #b0681f)', ph: '3rd' },
-            { pos: 1, no: 2, cls: 'linear-gradient(160deg, #ffd700, #f0a500)', ph: '2nd' },
-            { pos: 0, no: 1, cls: 'linear-gradient(160deg, #ff5f8f, #b23a63)', ph: '1st' },
-          ];
-          const isRowSelf = (entry) => user && (isTeamContest ? entry.user_name === myTeam?.name : entry.user_name === user.user_name);
           return (
             <>
               <div className="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
@@ -1109,8 +1092,6 @@ export default function ContestDetail() {
                   </a>
                 )}
               </div>
-
-              <ScoreboardGraph contestId={contest._id} startDate={contest.startDate} endDate={contest.endDate} scoreboardFrozen={scoreboardFrozen} serverNow={now} />
 
               {scoreboardFrozen && (
                 <div className="alert" style={{ background: 'rgba(99,102,241,0.12)', border: '1px solid rgba(99,102,241,0.3)', color: 'var(--accent)', borderRadius: 'var(--radius)' }}>
@@ -1136,72 +1117,15 @@ export default function ContestDetail() {
                 </div>
               ) : (
                 <>
-                  {!scoreboardHidden && saddles.length > 0 && (
-                    <div className="mb-4 d-flex justify-content-center align-items-end" style={{ gap: '0.75rem' }}>
-                        {podiumCols.map(({ pos, no, cls, ph }) => {
-                          const e = saddles[pos];
-                          const selfMark = e && isRowSelf(e);
-                          return (
-                            <div key={no} className="text-center" style={{ flex: '0 0 30%', minWidth: 120 }}>
-                              <div className="mx-auto mb-2" style={{
-                                width: 56, height: 56, borderRadius: '50%',
-                                background: cls,
-                                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                color: '#fff', fontWeight: 800, fontSize: '1.15rem',
-                                boxShadow: `0 8px 24px ${cls.includes('ffd700') ? 'rgba(255,215,0,0.35)' : cls.includes('ff5f8f') ? 'rgba(255,95,143,0.35)' : 'rgba(205,127,50,0.35)'}`,
-                                position: 'relative'
-                              }}>
-                                {e ? e.rank : ph}
-                                {e && selfMark && (
-                                  <span title="You" style={{ position: 'absolute', bottom: -2, right: -2, width: 18, height: 18, borderRadius: '50%', background: 'var(--accent)', color: '#fff', fontSize: '0.6rem', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '2px solid #0b0e1a' }}><i className="fas fa-user"></i></span>
-                                )}
-                              </div>
-                              <div className="fw-bold mb-1" style={{ color: 'var(--accent)', fontSize: '0.85rem' }}>{isTeamContest ? 'Team' : 'User'}</div>
-                              <div className="fw-bold" style={{ color: 'var(--text-primary)', fontSize: '0.95rem', maxWidth: 130, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', margin: '0 auto' }}>{e ? e.user_name : ''}</div>
-                              <div className="small" style={{ color: 'var(--accent)', fontWeight: 700 }}>{e ? e.total_score + ' pts' : ''}</div>
-                            </div>
-                          );
-                        })}
-                    </div>
-                  )}
-
                   <div className="neon-card p-0" style={{ overflow: 'hidden' }}>
-                    <div className="table-responsive">
-                      <table className="neon-table" style={{ marginBottom: 0, border: 'none' }}>
-                          <thead>
-                            <tr style={{ background: 'rgba(255,255,255,0.03)' }}>
-                              <th style={{ width: '52px', textAlign: 'center', padding: '0.85rem 0.75rem', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>#</th>
-                              <th style={{ padding: '0.85rem 1rem', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>{isTeamContest ? 'Team' : 'User'}</th>
-                              <th style={{ width: '110px', padding: '0.85rem 1rem', textAlign: 'right', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>Score</th>
-                            </tr>
-                          </thead>
-                        <tbody>
-                          {scoreboard.map((entry, i) => {
-                            const selfMark = isRowSelf(entry);
-                            return (
-                              <tr key={entry.rank} style={{
-                                borderBottom: i < scoreboard.length - 1 ? '1px solid rgba(255,255,255,0.04)' : 'none',
-                                background: selfMark ? 'rgba(99,102,241,0.10)' : 'transparent',
-                                borderLeft: selfMark ? '3px solid var(--accent)' : '3px solid transparent'
-                              }}>
-                                <td style={{ padding: '0.6rem 1rem', textAlign: 'center' }}>
-                                  <span style={{ display: 'inline-flex', flexShrink: 0 }} dangerouslySetInnerHTML={{ __html: getMedal(entry.rank) }} />
-                                </td>
-                                <td style={{ padding: '0.6rem 1rem' }}>
-                                  <span className="fw-bold" style={{ color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 200 }}>
-                                    {entry.user_name}
-                                    {selfMark && <span className="ms-2 badge" style={{ background: 'var(--accent)', fontSize: '0.6rem' }}>You</span>}
-                                  </span>
-                                </td>
-                                <td className="fw-bold" style={{ padding: '0.7rem 1rem', textAlign: 'right', color: entry.rank <= 3 ? 'var(--accent)' : 'var(--text-secondary)', fontSize: '1rem' }}>
-                                  {entry.total_score.toLocaleString()}
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
+                    <ScoreboardGrid
+                      scoreboard={scoreboard}
+                      challengesByCategory={challenges}
+                      isTeamContest={isTeamContest}
+                      selfName={isTeamContest ? (myTeam?.name || '') : (user?.user_name || '')}
+                      startDate={contest.startDate}
+                      contestId={contest._id}
+                    />
                   </div>
 
                   {myEntry && (

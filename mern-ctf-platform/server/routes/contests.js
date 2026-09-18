@@ -370,6 +370,7 @@ router.get('/:id/scoreboard', optionalAuth, async (req, res) => {
             user_name: { $first: '$team.name' },
             total_score: { $sum: '$challenge.point' },
             latest_solve_time: { $max: '$solved_at' },
+            solves: { $push: { id: '$challenge_id', solveTime: '$solved_at' } },
           },
         },
       );
@@ -391,6 +392,7 @@ router.get('/:id/scoreboard', optionalAuth, async (req, res) => {
             user_name: { $first: '$user.user_name' },
             total_score: { $sum: '$challenge.point' },
             latest_solve_time: { $max: '$solved_at' },
+            solves: { $push: { id: '$challenge_id', solveTime: '$solved_at' } },
           },
         },
       );
@@ -441,12 +443,71 @@ router.get('/:id/scoreboard', optionalAuth, async (req, res) => {
 
     const scoreboard = await Solve.aggregate(pipeline);
 
+    // ─── Blood counts (1st / 2nd / 3rd solve per challenge) ───
+    const bloodPipeline = [
+      { $match: matchStage },
+      {
+        $lookup: {
+          from: 'challenges',
+          localField: 'challenge_id',
+          foreignField: '_id',
+          as: 'challenge',
+        },
+      },
+      { $unwind: '$challenge' },
+      { $match: { 'challenge.visibility': 1 } },
+    ];
+    if (banStage) bloodPipeline.push(banStage ? { $match: banStage.$match } : null).filter(Boolean);
+    if (contest.participation_mode === 'team') {
+      bloodPipeline.push({ $match: { team_id: { $ne: null } } });
+    } else {
+      bloodPipeline.push(
+        {
+          $lookup: {
+            from: 'users',
+            localField: 'user_id',
+            foreignField: '_id',
+            as: 'user',
+          },
+        },
+        { $unwind: '$user' },
+        { $match: { 'user.role': 1 } },
+      );
+    }
+    const solverKey = contest.participation_mode === 'team' ? '$team_id' : '$user_id';
+    bloodPipeline.push(
+      { $sort: { challenge_id: 1, solved_at: 1, _id: 1 } },
+      {
+        $group: {
+          _id: '$challenge_id',
+          solve_order: { $push: { solver: solverKey } },
+        },
+      },
+      { $unwind: { path: '$solve_order', includeArrayIndex: 'blood_pos' } },
+      { $match: { blood_pos: { $lte: 2 } } },
+      {
+        $group: {
+          _id: '$solve_order.solver',
+          b_1: { $sum: { $cond: [{ $eq: ['$blood_pos', 0] }, 1, 0] } },
+          b_2: { $sum: { $cond: [{ $eq: ['$blood_pos', 1] }, 1, 0] } },
+          b_3: { $sum: { $cond: [{ $eq: ['$blood_pos', 2] }, 1, 0] } },
+        },
+      },
+    );
+    const bloods = await Solve.aggregate(bloodPipeline);
+    const bloodMap = {};
+    bloods.forEach((b) => { bloodMap[b._id] = b; });
+
     const result = scoreboard.map((entry, index) => ({
       rank: index + 1,
       user_id: entry._id,
       user_name: entry.user_name,
       total_score: entry.total_score,
       latest_solve_time: entry.latest_solve_time,
+      solves: entry.solves || [],
+      blood_1: (bloodMap[entry._id] && bloodMap[entry._id].b_1) || 0,
+      blood_2: (bloodMap[entry._id] && bloodMap[entry._id].b_2) || 0,
+      blood_3: (bloodMap[entry._id] && bloodMap[entry._id].b_3) || 0,
     }));
 
     res.json({ success: true, scoreboard: result, frozen: !isAdmin && isFrozen });
@@ -718,11 +779,20 @@ router.get('/:id/scoreboard/timeline', optionalAuth, async (req, res) => {
       };
     });
 
-    const filtered = timeline
+    const ranked = timeline
       .filter(e => e.data.length > 0)
-      .sort((a, b) => b.final_score - a.final_score || a.last_solve_time - b.last_solve_time)
-      .slice(0, 10)
-      .map((entry, idx) => ({ ...entry, rank: idx + 1 }));
+      .sort((a, b) => b.final_score - a.final_score || a.last_solve_time - b.last_solve_time);
+
+    const filtered = ranked.slice(0, 10).map((entry, idx) => ({ ...entry, rank: idx + 1 }));
+
+    const includeName = String(req.query.include || '').trim();
+    if (includeName) {
+      const inc = ranked.find(e => String(e.user_name) === includeName);
+      if (inc && !filtered.some(e => String(e.user_name) === includeName)) {
+        const incRank = ranked.findIndex(e => String(e.user_name) === includeName) + 1;
+        filtered.push({ ...inc, rank: incRank });
+      }
+    }
 
     res.json({ success: true, timeline: filtered });
   } catch (err) {
