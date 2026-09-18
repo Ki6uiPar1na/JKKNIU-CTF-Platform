@@ -34,13 +34,22 @@ router.post('/submit', verifyToken, async (req, res) => {
     const contest = await Contest.findById(contestId);
     if (!contest) return res.json({ success: false, submission_type: 'blank', message: 'Contest not found.' });
 
-    if (contest.isArchived || (contest.endDate && new Date() > new Date(contest.endDate))) {
-      return res.json({ success: false, submission_type: 'blank', message: 'This contest has ended.' });
+    const challenge = await Challenge.findOne({ _id: challenge_id, contest_id: contestId });
+    if (!challenge || challenge.visibility !== 1) {
+      return res.json({ success: false, submission_type: 'blank', message: 'Challenge not found.' });
     }
+
+    const isPractice = challenge.submission_enabled === 0;
+
+    const contestEnded = contest.isArchived || (contest.endDate && new Date() > new Date(contest.endDate));
 
     const now = new Date();
     if (contest.startDate && now < new Date(contest.startDate)) {
       return res.json({ success: false, submission_type: 'blank', message: 'The contest has not started yet.' });
+    }
+
+    if (contestEnded && !isPractice) {
+      return res.json({ success: false, submission_type: 'blank', message: 'This contest has ended. You can still open problems and test flags on practice challenges, but no points are awarded for them.' });
     }
 
     if (contest.submission_status === 'closed') {
@@ -71,16 +80,13 @@ router.post('/submit', verifyToken, async (req, res) => {
       team_name = team.name;
     }
 
-    const challenge = await Challenge.findOne({ _id: challenge_id, contest_id: contestId });
-    if (!challenge) {
-      return res.json({ success: false, submission_type: 'blank', message: 'Challenge not found.' });
+    const cleanFlag = typeof submitted_flag === 'string' ? submitted_flag.trim() : '';
+    if (!cleanFlag) {
+      return res.json({ success: false, submission_type: 'blank', message: 'No flag provided.' });
     }
-
-    if (challenge.visibility !== 1) {
-      return res.json({ success: false, submission_type: 'blank', message: 'Challenge not found.' });
+    if (cleanFlag.length > 2048) {
+      return res.json({ success: false, submission_type: 'blank', message: 'Flag is too long.' });
     }
-
-    const isPractice = challenge.submission_enabled === 0;
 
     const subFilter = { challenge_id, contest_id: contestId };
     if (team_id) subFilter.team_id = team_id;
@@ -101,14 +107,14 @@ router.post('/submit', verifyToken, async (req, res) => {
 
     const flags = await Flag.find({ challenge_id });
     const match = flags.find(f => {
-      if (f.is_case_sensitive) return f.value === submitted_flag;
-      return f.value.toLowerCase() === submitted_flag.toLowerCase();
+      if (f.is_case_sensitive) return f.value === cleanFlag;
+      return f.value.toLowerCase() === cleanFlag.toLowerCase();
     });
 
     const submission_type = match ? 'correct' : 'incorrect';
 
     const submission = await Submission.create({
-      submitted_flag,
+      submitted_flag: cleanFlag,
       challenge_id,
       contest_id: contestId,
       user_id,

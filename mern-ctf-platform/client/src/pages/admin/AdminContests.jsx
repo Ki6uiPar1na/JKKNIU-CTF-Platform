@@ -66,6 +66,17 @@ export default function AdminContests() {
     return <span className="badge bg-success">Active</span>;
   };
 
+  const handleClone = async (c) => {
+    if (!confirm(`Clone "${c.title}" with all its challenges, flags, and hints? It will be created as a new upcoming contest (\"${c.title} (Copy)\").`)) return;
+    try {
+      const res = await api.post(`/admin/contests/${c._id}/clone`);
+      showToast(res.data.message || 'Contest cloned!', 'success');
+      load();
+    } catch (err) {
+      showToast(err.response?.data?.error || 'Failed to clone contest', 'error');
+    }
+  };
+
   if (loading) return <div className="spinner-neon"></div>;
 
   return (
@@ -159,7 +170,14 @@ export default function AdminContests() {
                     <td>{statusBadge(c)}</td>
                     <td style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>{formatDate(c.startDate)}</td>
                     <td style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>{formatDate(c.endDate)}</td>
-                    <td><Link to={`/admin/contests/${c._id}`} className="btn btn-neon-outline btn-sm">Manage</Link></td>
+                    <td>
+                      <div className="d-flex gap-2 flex-wrap">
+                        <button className="btn btn-neon-outline btn-sm" onClick={() => handleClone(c)} title="Clone this contest for replay">
+                          <i className="fas fa-copy me-1"></i>Clone
+                        </button>
+                        <Link to={`/admin/contests/${c._id}`} className="btn btn-neon-outline btn-sm">Manage</Link>
+                      </div>
+                    </td>
                   </tr>
                 ))}
               </tbody>

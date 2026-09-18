@@ -46,6 +46,16 @@ function normalizeEmail(value) {
   return String(value || '').trim().toLowerCase();
 }
 
+function flagBinary(v, fallback) {
+  if (v === undefined || v === null || v === '') return fallback;
+  const n = Number(v);
+  return n === 0 || n === 1 ? n : null;
+}
+
+function toBool(v) {
+  return v === true || Number(v) === 1;
+}
+
 const router = Router();
 router.use(verifyToken, adminOnly);
 
@@ -227,6 +237,80 @@ router.delete('/contests/:id', async (req, res) => {
   }
 });
 
+// ─── Clone Contest (replay) ───
+
+router.post('/contests/:id/clone', async (req, res) => {
+  try {
+    const sourceId = req.params.id;
+    const source = await Contest.findById(sourceId);
+    if (!source) return res.status(404).json({ success: false, error: 'Contest not found.' });
+
+    const src = source.toObject();
+    const baseTitle = (src.title || 'Untitled Contest').replace(/\s+\(Copy\)$/, '') + ' (Copy)';
+    const title = baseTitle.length > 200 ? baseTitle.slice(0, 200) : baseTitle;
+
+    const newContest = await Contest.create({
+      title,
+      description: src.description || '',
+      banner_url: src.banner_url || '',
+      startDate: null,
+      endDate: null,
+      isArchived: false,
+      paused: false,
+      submission_status: 'open',
+      scoreboard_visibility: src.scoreboard_visibility || 'public',
+      scoreboard_freeze_time: null,
+      participation_mode: src.participation_mode || 'solo',
+      max_team_size: src.max_team_size ?? 4,
+      pre_registration_enabled: !!src.pre_registration_enabled,
+      pre_registration_fields: (src.pre_registration_fields || []).map(f => ({
+        label: f.label,
+        type: f.type || 'text',
+        required: f.required !== false,
+        options: f.options || [],
+      })),
+      createdBy: req.user.user_id,
+    });
+
+    const challenges = await Challenge.find({ contest_id: sourceId });
+    const challengeIdMap = new Map();
+    for (const c of challenges) {
+      const obj = c.toObject();
+      const newChallenge = await Challenge.create({
+        contest_id: newContest._id,
+        name: obj.name,
+        description: obj.description,
+        point: obj.point,
+        max_attempts: obj.max_attempts,
+        category: obj.category,
+        visibility: obj.visibility,
+        submission_enabled: obj.submission_enabled,
+        files: obj.files || [],
+      });
+      challengeIdMap.set(c._id.toString(), newChallenge._id);
+    }
+
+    for (const [oldId, newId] of challengeIdMap) {
+      const flags = await Flag.find({ challenge_id: oldId });
+      if (flags.length > 0) {
+        await Flag.insertMany(flags.map(f => ({ value: f.value, challenge_id: newId, is_case_sensitive: !!f.is_case_sensitive })));
+      }
+      const hints = await Hint.find({ challenge_id: oldId });
+      if (hints.length > 0) {
+        await Hint.insertMany(hints.map(h => ({ content: h.content, challenge_id: newId, cost: h.cost || 0 })));
+      }
+    }
+
+    logAdminAction(req, 'Cloned contest', 'contest', newContest._id, `From: ${src.title}, Title: ${title}`);
+    await cacheDel(makeCacheKey('/api/contests*'));
+    await cacheDel(makeCacheKey('/api/admin/contests*'));
+    res.json({ success: true, message: `Contest cloned. "${title}" created as an upcoming contest.`, contest: newContest });
+  } catch (err) {
+    console.error('Clone contest error:', err.message, err.stack);
+    res.status(500).json({ success: false, error: 'Server error.' });
+  }
+});
+
 // ─── Contest Banner Upload ───
 
 router.post('/upload-banner', (req, res) => {
@@ -330,6 +414,12 @@ router.post('/contests/:contestId/challenges', async (req, res) => {
 
     const sanitizedDescription = stripHtml(description || '');
 
+    const vis = flagBinary(visibility, 1);
+    const sub = flagBinary(submission_enabled, 1);
+    if (vis === null || sub === null) {
+      return res.status(400).json({ success: false, error: 'Visibility and Solve Status must be 0 or 1.' });
+    }
+
     const challenge = await Challenge.create({
       contest_id: contestId,
       name: challenge_name,
@@ -337,8 +427,8 @@ router.post('/contests/:contestId/challenges', async (req, res) => {
       point: points,
       max_attempts,
       category,
-      visibility: visibility ?? 1,
-      submission_enabled: submission_enabled ?? 1,
+      visibility: vis,
+      submission_enabled: sub,
     });
 
     const flags = flag_value.split(',').map(f => f.trim()).filter(Boolean);
@@ -346,7 +436,7 @@ router.post('/contests/:contestId/challenges', async (req, res) => {
       await Flag.create({
         value,
         challenge_id: challenge._id,
-        is_case_sensitive: case_sensitive === 1 || case_sensitive === true,
+        is_case_sensitive: toBool(case_sensitive),
       });
     }
 
@@ -434,27 +524,37 @@ router.put('/challenges/bulk-submission', async (req, res) => {
 router.put('/challenges/:id', async (req, res) => {
   try {
     const { challenge_name, category, description, points, max_attempts, flag_value, case_sensitive, visibility, submission_enabled } = req.body;
-    const challenge = await Challenge.findByIdAndUpdate(req.params.id, {
-      name: challenge_name,
-      description: stripHtml(description || ''),
-      point: points,
-      max_attempts,
-      category,
-      visibility,
-      submission_enabled,
-    });
+
+    const vis = flagBinary(visibility, undefined);
+    const sub = flagBinary(submission_enabled, undefined);
+    if (vis === null || sub === null) {
+      return res.status(400).json({ success: false, error: 'Visibility and Solve Status must be 0 or 1.' });
+    }
+
+    const update = {};
+    if (challenge_name !== undefined) update.name = challenge_name;
+    if (category !== undefined) update.category = category;
+    if (description !== undefined) update.description = stripHtml(description || '');
+    if (points !== undefined) update.point = points;
+    if (max_attempts !== undefined) update.max_attempts = max_attempts;
+    if (vis !== undefined) update.visibility = vis;
+    if (sub !== undefined) update.submission_enabled = sub;
+
+    const challenge = await Challenge.findByIdAndUpdate(req.params.id, update, { new: false, runValidators: true });
 
     if (!challenge) return res.status(404).json({ success: false, error: 'Challenge not found.' });
 
-    await Flag.deleteMany({ challenge_id: req.params.id });
+    if (flag_value !== undefined) {
+      await Flag.deleteMany({ challenge_id: req.params.id });
 
-    const flags = flag_value.split(',').map(f => f.trim()).filter(Boolean);
-    for (const value of flags) {
-      await Flag.create({
-        value,
-        challenge_id: req.params.id,
-        is_case_sensitive: case_sensitive === 1 || case_sensitive === true,
-      });
+      const flags = flag_value.split(',').map(f => f.trim()).filter(Boolean);
+      for (const value of flags) {
+        await Flag.create({
+          value,
+          challenge_id: req.params.id,
+          is_case_sensitive: toBool(case_sensitive),
+        });
+      }
     }
 
     logAdminAction(req, 'Updated challenge', 'challenge', req.params.id, `Name: ${challenge_name}`);
@@ -927,10 +1027,21 @@ router.get('/submissions', async (req, res) => {
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 10;
     const skip = (page - 1) * limit;
-    const contestId = req.query.contestId;
+    const { contestId, search, submissionId, challengeName } = req.query;
 
     const filter = {};
     if (contestId) filter.contest_id = contestId;
+    if (submissionId && mongoose.isValidObjectId(submissionId)) filter._id = submissionId;
+    if (search) {
+      const userIds = (await User.find({ user_name: { $regex: search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), $options: 'i' } }).select('_id').lean()).map(u => u._id);
+      if (userIds.length) filter.user_id = { $in: userIds };
+      else filter._id = null;
+    }
+    if (challengeName) {
+      const challengeIds = (await Challenge.find({ name: { $regex: challengeName.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), $options: 'i' } }).select('_id').lean()).map(c => c._id);
+      if (challengeIds.length) filter.challenge_id = { $in: challengeIds };
+      else filter._id = null;
+    }
 
     const total = await Submission.countDocuments(filter);
     const totalPages = Math.ceil(total / limit);

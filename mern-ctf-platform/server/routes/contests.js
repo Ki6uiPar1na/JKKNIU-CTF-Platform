@@ -195,16 +195,22 @@ router.post('/:id/submit', verifyToken, async (req, res) => {
     const contest = await Contest.findById(contestId);
     if (!contest) return res.json({ success: false, submission_type: 'blank', message: 'Contest not found.' });
 
-    if (contest.isArchived || contest.status === 'archived') {
-      return res.json({ success: false, submission_type: 'blank', message: 'This contest has ended.' });
+    const challenge = await Challenge.findOne({ _id: challenge_id, contest_id: contestId });
+    if (!challenge || challenge.visibility !== 1) {
+      return res.json({ success: false, submission_type: 'blank', message: 'Challenge not found.' });
     }
+
+    const isPractice = challenge.submission_enabled === 0;
+
+    const contestEnded = contest.isArchived || contest.status === 'archived' || (contest.endDate && new Date() > new Date(contest.endDate));
 
     const now = new Date();
     if (contest.startDate && now < new Date(contest.startDate)) {
       return res.json({ success: false, submission_type: 'blank', message: 'The contest has not started yet.' });
     }
-    if (contest.endDate && now > new Date(contest.endDate)) {
-      return res.json({ success: false, submission_type: 'blank', message: 'The contest has ended.' });
+
+    if (contestEnded && !isPractice) {
+      return res.json({ success: false, submission_type: 'blank', message: 'This contest has ended. You can still open problems and test flags on practice challenges, but no points are awarded for them.' });
     }
 
     if (contest.submission_status === 'closed') {
@@ -232,16 +238,13 @@ router.post('/:id/submit', verifyToken, async (req, res) => {
       team_name = team.name;
     }
 
-    const challenge = await Challenge.findOne({ _id: challenge_id, contest_id: contestId });
-    if (!challenge) {
-      return res.json({ success: false, submission_type: 'blank', message: 'Challenge not found.' });
+    const cleanFlag = typeof submitted_flag === 'string' ? submitted_flag.trim() : '';
+    if (!cleanFlag) {
+      return res.json({ success: false, submission_type: 'blank', message: 'No flag provided.' });
     }
-
-    if (challenge.visibility !== 1) {
-      return res.json({ success: false, submission_type: 'blank', message: 'Challenge not found.' });
+    if (cleanFlag.length > 2048) {
+      return res.json({ success: false, submission_type: 'blank', message: 'Flag is too long.' });
     }
-
-    const isPractice = challenge.submission_enabled === 0;
 
     const subFilter = { challenge_id, contest_id: contestId };
     if (team_id) subFilter.team_id = team_id;
@@ -262,14 +265,14 @@ router.post('/:id/submit', verifyToken, async (req, res) => {
 
     const flags = await Flag.find({ challenge_id });
     const match = flags.find(f => {
-      if (f.is_case_sensitive) return f.value === submitted_flag;
-      return f.value.toLowerCase() === submitted_flag.toLowerCase();
+      if (f.is_case_sensitive) return f.value === cleanFlag;
+      return f.value.toLowerCase() === cleanFlag.toLowerCase();
     });
 
     const submission_type = match ? 'correct' : 'incorrect';
 
     const submission = await Submission.create({
-      submitted_flag,
+      submitted_flag: cleanFlag,
       challenge_id,
       contest_id: contestId,
       user_id,
@@ -458,7 +461,6 @@ router.post('/:contestId/hints/:hintId/reveal', verifyToken, async (req, res) =>
   try {
     const hint = await Hint.findById(req.params.hintId);
     if (!hint) return res.status(404).json({ success: false, error: 'Hint not found.' });
-    if (hint.cost === 0) return res.status(400).json({ success: false, error: 'Free hints do not need to be revealed.' });
 
     const contest = await Contest.findById(req.params.contestId);
     if (!contest) return res.status(404).json({ success: false, error: 'Contest not found.' });
@@ -476,6 +478,12 @@ router.post('/:contestId/hints/:hintId/reveal', verifyToken, async (req, res) =>
       return res.status(404).json({ success: false, error: 'Hint not found.' });
     }
 
+    const isPractice = hintChallenge.submission_enabled === 0;
+    const effectiveCost = isPractice ? 0 : hint.cost;
+    if (!isPractice && hint.cost === 0) {
+      return res.status(400).json({ success: false, error: 'Free hints do not need to be revealed.' });
+    }
+
     let user_id = null, team_id = null;
     if (contest.participation_mode === 'team') {
       const team = await Team.findOne({ contest_id: contest._id, members: req.user.user_id });
@@ -490,14 +498,25 @@ router.post('/:contestId/hints/:hintId/reveal', verifyToken, async (req, res) =>
     else filter.user_id = user_id;
 
     const existing = await HintReveal.findOne(filter);
-    if (existing) return res.json({ success: true, message: 'Hint already revealed.', hint, already_revealed: true });
+    if (existing) {
+      const shown = hint.toObject();
+      if (isPractice) shown.cost = 0;
+      return res.json({ success: true, message: isPractice ? 'Hint revealed (practice — no points deducted).' : 'Hint already revealed.', hint: shown, already_revealed: true });
+    }
 
-    await HintReveal.create({ ...filter, cost: hint.cost });
+    await HintReveal.create({ ...filter, cost: effectiveCost });
 
     await cacheDel(makeCacheKey(`/api/contests/${req.params.contestId}/scoreboard*`));
     await cacheDel(makeCacheKey(`/api/contests/${req.params.contestId}/scoreboard/timeline*`));
 
-    res.json({ success: true, message: `Hint revealed for ${hint.cost} points!`, hint, cost: hint.cost });
+    const shown = hint.toObject();
+    if (isPractice) shown.cost = 0;
+    res.json({
+      success: true,
+      message: isPractice ? 'Hint revealed (practice — no points deducted).' : `Hint revealed for ${hint.cost} points!`,
+      hint: shown,
+      cost: effectiveCost,
+    });
   } catch (err) {
     res.status(500).json({ success: false, error: 'Server error.' });
   }
@@ -531,6 +550,7 @@ router.get('/:contestId/challenges/:challengeId/hints', verifyToken, async (req,
     }
 
     const hints = await Hint.find({ challenge_id: req.params.challengeId }).sort({ cost: 1 });
+    const isPractice = challenge.submission_enabled === 0;
     const cheapHints = hints.filter(h => h.cost === 0);
     const paidHints = hints.filter(h => h.cost > 0);
 
@@ -547,13 +567,22 @@ router.get('/:contestId/challenges/:challengeId/hints', verifyToken, async (req,
       revealedIds = reveals.map(r => r.hint_id.toString());
     }
 
-    const visiblePaidHints = paidHints.map(h => {
-      const obj = h.toObject();
-      if (!revealedIds.includes(h._id.toString())) obj.content = null;
-      return obj;
-    });
+    let visiblePaidHints;
+    if (isPractice) {
+      visiblePaidHints = paidHints.map(h => {
+        const obj = h.toObject();
+        obj.cost = 0;
+        return obj;
+      });
+    } else {
+      visiblePaidHints = paidHints.map(h => {
+        const obj = h.toObject();
+        if (!revealedIds.includes(h._id.toString())) obj.content = null;
+        return obj;
+      });
+    }
 
-    res.json({ success: true, hints: cheapHints, paid_hints: visiblePaidHints, revealed_ids: revealedIds });
+    res.json({ success: true, hints: cheapHints, paid_hints: visiblePaidHints, revealed_ids: revealedIds, practice_mode: isPractice });
   } catch (err) {
     res.status(500).json({ success: false, error: 'Server error.' });
   }
@@ -846,6 +875,7 @@ router.get('/:id/profile', verifyToken, async (req, res) => {
       submissions: submissions.map(s => ({
         challenge_name: s.challenge_id?.name || 'Unknown',
         submission_type: s.submission_type,
+        practice: !!s.practice,
         created_at: s.createdAt,
       })),
       team: team

@@ -54,21 +54,24 @@ function ChallengeModal({ challenge, userProgress, onClose, onSubmit }) {
 
   const allHints = [...hints, ...paidHints];
   const hasHints = allHints.length > 0;
+  const isPractice = challenge.submission_enabled === 0;
 
   return (
-    <div className="modal fade show d-block" tabIndex="-1" style={{ background: 'rgba(0,0,0,0.7)' }} onClick={onClose}>
-      <div className="modal-dialog modal-dialog-centered modal-dialog-scrollable" onClick={e => e.stopPropagation()}>
-        <div className="modal-content">
-          <div className="modal-header">
+    <div className="modal fade show d-block" tabIndex="-1" style={{ background: 'rgba(8, 10, 22, 0.5)', backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)' }} onClick={onClose}>
+      <div className="modal-dialog modal-dialog-centered modal-dialog-scrollable" style={{ maxWidth: '1050px', width: 'calc(100% - 2rem)' }} onClick={e => e.stopPropagation()}>
+        <div className="modal-content" style={{ background: 'linear-gradient(160deg, rgba(35, 39, 66, 0.82), rgba(18, 20, 38, 0.82))', backdropFilter: 'blur(24px) saturate(140%)', WebkitBackdropFilter: 'blur(24px) saturate(140%)', border: '1px solid rgba(255, 255, 255, 0.12)', borderRadius: '1rem', boxShadow: '0 16px 60px rgba(0, 0, 0, 0.55)' }}>
+          <div className="modal-header" style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.08)', background: 'transparent' }}>
             <h5 className="modal-title"><i className="fas fa-laptop-code me-2"></i>Challenge</h5>
             <button type="button" className="btn-close" onClick={onClose}></button>
           </div>
           <div className="modal-body">
-            <h4 className="fw-bold mb-2" style={{ color: 'var(--accent)' }}>{challenge.name}</h4>
-            <div className="d-flex gap-3 mb-3">
+            <h4 className="fw-bold mb-2 text-center" style={{ color: 'var(--accent)' }}>{challenge.name}</h4>
+            <div className="text-center mb-1">
               <span className="badge" style={{ background: 'rgba(99,102,241,0.1)', color: 'var(--accent)', border: '1px solid rgba(99,102,241,0.2)' }}>
                 <i className="fas fa-star me-1 text-warning"></i>{challenge.point} pts
               </span>
+            </div>
+            <div className="d-flex justify-content-center gap-3 mb-3">
               <span className="badge" style={{ background: 'rgba(255,255,255,0.04)', color: 'var(--text-secondary)', border: '1px solid rgba(255,255,255,0.06)' }}>
                 <i className="fas fa-tag me-1"></i>{challenge.category}
               </span>
@@ -77,7 +80,7 @@ function ChallengeModal({ challenge, userProgress, onClose, onSubmit }) {
               </span>
             </div>
 
-            <ul className="nav nav-tabs mb-3" style={{ borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
+            <ul className="nav nav-tabs mb-3 justify-content-center" style={{ borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
               <li className="nav-item">
                 <button type="button" className={`nav-link ${activeTab === 'overview' ? 'active' : ''}`} onClick={() => setActiveTab('overview')}
                   style={{ color: activeTab === 'overview' ? 'var(--accent)' : 'var(--text-secondary)', fontSize: '0.85rem' }}>
@@ -135,7 +138,7 @@ function ChallengeModal({ challenge, userProgress, onClose, onSubmit }) {
                     <h6 className="fw-bold mb-2"><i className="fas fa-lightbulb me-2" style={{ color: '#facc15' }}></i>Hints</h6>
                     {hintsLoading ? <div className="spinner-neon" style={{ height: '24px' }}></div> : allHints.map(h => (
                       <div key={h._id} className="mb-2 p-2" style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 'var(--radius)', borderLeft: '3px solid #facc15' }}>
-                        {h.cost === 0 || revealed[h._id] ? (
+                        {h.cost === 0 || revealed[h._id] || isPractice ? (
                           <span style={{ fontSize: '0.85rem' }}>{h.content}</span>
                         ) : (
                           <div className="d-flex justify-content-between align-items-center">
@@ -146,7 +149,7 @@ function ChallengeModal({ challenge, userProgress, onClose, onSubmit }) {
                           </div>
                         )}
                         <span className={`badge ${h.cost === 0 ? 'bg-success' : 'bg-warning text-dark'} ms-2`} style={{ fontSize: '0.6rem' }}>
-                          {h.cost === 0 ? 'Free' : `${h.cost} pts`}
+                          {h.cost === 0 ? (isPractice ? 'Free (practice)' : 'Free') : `${h.cost} pts`}
                         </span>
                       </div>
                     ))}
@@ -172,7 +175,7 @@ function ChallengeModal({ challenge, userProgress, onClose, onSubmit }) {
               </>
             )}
           </div>
-          <div className="modal-footer">
+          <div className="modal-footer" style={{ borderTop: '1px solid rgba(255, 255, 255, 0.08)', background: 'transparent' }}>
             <button className="btn btn-neon-outline btn-sm" onClick={onClose}>Cancel</button>
             {activeTab === 'overview' && (
               <button className="btn btn-neon btn-sm" onClick={() => onSubmit(flag)} disabled={!flag.trim() || (challenge.submission_enabled === 1 && userProgress[challenge._id]?.remaining_attempts === 0)}>
@@ -298,7 +301,25 @@ export default function ContestDetail() {
       );
       setUserProgress(chRes.data.user_progress);
       setCategories(catRes.data.categories);
+      const savedChallengeId = localStorage.getItem(`openChallenge:${id}`);
+      if (savedChallengeId) {
+        const savedChallenge = Object.values(chRes.data.challenges)
+          .flat()
+          .find(c => c.visibility === 1 && String(c._id) === savedChallengeId);
+        if (savedChallenge) setModal(savedChallenge);
+        else localStorage.removeItem(`openChallenge:${id}`);
+      }
     } catch { showToast('Failed to load challenges', 'error'); }
+  };
+
+  const openChallenge = (ch) => {
+    localStorage.setItem(`openChallenge:${id}`, ch._id);
+    setModal(ch);
+  };
+
+  const closeModal = () => {
+    localStorage.removeItem(`openChallenge:${id}`);
+    setModal(null);
   };
 
   const loadScoreboard = async () => {
@@ -480,7 +501,7 @@ export default function ContestDetail() {
       });
       const d = res.data;
       showToast(d.message, d.submission_type !== 'incorrect' ? 'success' : 'error');
-      if (d.submission_type === 'correct' && !d.practice) { playSuccessSound(); setModal(null); loadChallenges(); loadScoreboard(); }
+      if (d.submission_type === 'correct' && !d.practice) { playSuccessSound(); closeModal(); loadChallenges(); loadScoreboard(); }
       else if (d.success) { loadChallenges(); }
     } catch (err) {
       showToast(err.response?.data?.message || 'Error submitting flag', 'error');
@@ -898,6 +919,7 @@ export default function ContestDetail() {
                                 <span className={`badge ${s.submission_type === 'correct' ? 'bg-success' : 'bg-danger'}`} style={{ fontSize: '0.7rem' }}>
                                   {s.submission_type}
                                 </span>
+                                {s.practice && <span className="badge ms-1" style={{ background: '#facc15', color: '#000', fontSize: '0.6rem' }}>Practice</span>}
                               </td>
                               <td style={{ padding: '0.4rem 0.75rem', fontSize: '0.8rem', textAlign: 'right', color: 'var(--text-muted)' }}>{new Date(s.created_at).toLocaleString()}</td>
                             </tr>
@@ -1137,7 +1159,7 @@ export default function ContestDetail() {
         const challengeContent = (
           <>
             {contestStatus === 'archived' && (
-              <div className="alert alert-secondary py-2"><i className="fas fa-info-circle me-1"></i>This contest has ended. Challenges are in read-only mode.</div>
+              <div className="alert alert-secondary py-2"><i className="fas fa-info-circle me-1"></i>This contest has ended. You can still open challenges and test flags on Practice-locked ones (marked <i className="fas fa-dumbbell me-1"></i>Practice), but no points are awarded.</div>
             )}
             <div className="d-flex gap-2 mb-2 flex-wrap">
               <button className={`filter-link btn text-start ${solveFilter === 'all' ? 'active' : ''}`} onClick={() => setSolveFilter('all')} style={{ width: 'auto' }}>
@@ -1184,7 +1206,7 @@ export default function ContestDetail() {
                         <div key={ch._id} className="col-12 col-sm-6 col-md-4 col-lg-3">
                           <div className={`challenge-card ${statusClass}`}
                             style={{ borderColor: color, boxShadow: `0 0 0 1px ${color}20`, position: 'relative' }}
-                            onClick={() => { if (contestStatus !== 'archived') setModal(ch); }}>
+                            onClick={() => openChallenge(ch)}>
                             {user && (user.role === 0 || user.role === 2) && (
                               <div className="d-flex gap-1 mb-2 flex-wrap" onClick={e => e.stopPropagation()}
                                 style={{ position: 'absolute', top: '6px', right: '6px' }}>
@@ -1221,8 +1243,8 @@ export default function ContestDetail() {
                 </div>
               ))
             )}
-            {modal && contestStatus !== 'archived' && (
-              <ChallengeModal challenge={modal} userProgress={userProgress} onClose={() => setModal(null)} onSubmit={handleSubmitFlag} />
+            {modal && (
+              <ChallengeModal challenge={modal} userProgress={userProgress} onClose={closeModal} onSubmit={handleSubmitFlag} />
             )}
           </>
         );

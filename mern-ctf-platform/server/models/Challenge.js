@@ -7,8 +7,22 @@ const challengeSchema = new mongoose.Schema({
   point: { type: Number, required: true },
   max_attempts: { type: Number, required: true },
   category: { type: String, required: true },
-  visibility: { type: Number, default: 1 },
-  submission_enabled: { type: Number, default: 1 },
+  visibility: {
+    type: Number,
+    default: 1,
+    validate: {
+      validator: v => v === 0 || v === 1,
+      message: 'visibility must be 0 or 1.',
+    },
+  },
+  submission_enabled: {
+    type: Number,
+    default: 1,
+    validate: {
+      validator: v => v === 0 || v === 1,
+      message: 'submission_enabled must be 0 or 1.',
+    },
+  },
   files: [{ type: String }],
 }, { timestamps: true });
 

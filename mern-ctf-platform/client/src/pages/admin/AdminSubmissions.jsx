@@ -8,17 +8,48 @@ export default function AdminSubmissions() {
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [detailId, setDetailId] = useState(null);
+  const [search, setSearch] = useState('');
+  const [searchInput, setSearchInput] = useState('');
+  const [submissionId, setSubmissionId] = useState('');
+  const [submissionIdInput, setSubmissionIdInput] = useState('');
+  const [challengeName, setChallengeName] = useState('');
+  const [challengeNameInput, setChallengeNameInput] = useState('');
   const pageRef = useRef(page);
   pageRef.current = page;
 
   const load = async (p) => {
     const pageNum = p ?? pageRef.current;
     try {
-      const res = await api.get(`/admin/submissions?page=${pageNum}&limit=15`);
+      const params = new URLSearchParams({ page: pageNum, limit: 15 });
+      if (search) params.set('search', search);
+      if (submissionId) params.set('submissionId', submissionId);
+      if (challengeName) params.set('challengeName', challengeName);
+      const res = await api.get(`/admin/submissions?${params}`);
       if (res.data.success) { setData(res.data.data); setTotalPages(res.data.pagination.total_pages); setPage(res.data.pagination.current_page); }
     } catch {}
   };
-  useEffect(() => { load(); const i = setInterval(() => load(), 10000); return () => clearInterval(i); }, []);
+  const hasFilters = !!(search || submissionId || challengeName);
+  useEffect(() => {
+    load(1);
+    if (hasFilters) return undefined;
+    const i = setInterval(() => load(), 10000);
+    return () => clearInterval(i);
+  }, [search, submissionId, challengeName, hasFilters]);
+
+  const applyFilters = () => {
+    setSearch(searchInput.trim());
+    setSubmissionId(submissionIdInput.trim());
+    setChallengeName(challengeNameInput.trim());
+  };
+
+  const clearFilters = () => {
+    setSearchInput('');
+    setSubmissionIdInput('');
+    setChallengeNameInput('');
+    setSearch('');
+    setSubmissionId('');
+    setChallengeName('');
+  };
 
   const handleToggle = async (id) => {
     if (!confirm('Toggle this submission type?')) return;
@@ -41,6 +72,28 @@ export default function AdminSubmissions() {
       <AdminSidebar />
       <div className="flex-grow-1 p-4">
         <h2 className="fw-bold mb-4" style={{ letterSpacing: '-0.02em' }}><i className="fas fa-file-alt me-2" style={{ color: 'var(--accent)' }}></i>Submissions</h2>
+        <div className="card mb-4" style={{ background: 'rgba(30,32,42,0.6)', border: '1px solid rgba(99,102,241,0.15)', borderRadius: 'var(--radius)' }}>
+          <div className="card-body">
+            <div className="row g-2 align-items-end">
+              <div className="col-md-4">
+                <label className="form-label mb-1"><i className="fas fa-user me-1" style={{ color: 'var(--accent)' }}></i>Username</label>
+                <input type="text" className="form-control form-control-sm" value={searchInput} onChange={e => setSearchInput(e.target.value)} placeholder="Search by username..." />
+              </div>
+              <div className="col-md-3">
+                <label className="form-label mb-1"><i className="fas fa-hashtag me-1" style={{ color: 'var(--accent)' }}></i>Submission ID</label>
+                <input type="text" className="form-control form-control-sm" value={submissionIdInput} onChange={e => setSubmissionIdInput(e.target.value)} placeholder="Exact submission ID..." />
+              </div>
+              <div className="col-md-3">
+                <label className="form-label mb-1"><i className="fas fa-flag me-1" style={{ color: 'var(--accent)' }}></i>Challenge Name</label>
+                <input type="text" className="form-control form-control-sm" value={challengeNameInput} onChange={e => setChallengeNameInput(e.target.value)} placeholder="Search by challenge..." />
+              </div>
+              <div className="col-md-2 d-flex gap-2">
+                <button className="btn btn-neon btn-sm flex-grow-1" onClick={applyFilters}><i className="fas fa-search me-1"></i>Filter</button>
+                <button className="btn btn-neon-outline btn-sm" onClick={clearFilters} title="Clear filters"><i className="fas fa-eraser"></i></button>
+              </div>
+            </div>
+          </div>
+        </div>
         <div className="table-responsive">
           <table className="neon-table">
             <thead>
@@ -70,7 +123,7 @@ export default function AdminSubmissions() {
                   <td>{new Date(s.timestamp_of_submission).toLocaleString()}</td>
                 </tr>
               ))}
-              {data.length === 0 && <tr><td colSpan="7" className="text-center">No submissions.</td></tr>}
+              {data.length === 0 && <tr><td colSpan="7" className="text-center">{(search || submissionId || challengeName) ? 'No submissions match the filters.' : 'No submissions.'}</td></tr>}
             </tbody>
           </table>
         </div>
