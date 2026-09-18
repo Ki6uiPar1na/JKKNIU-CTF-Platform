@@ -26,8 +26,9 @@ const CAT_COLORS = {
   reversing: 'var(--category-reverse)',
 };
 
-const HEAD_H = 96;
+const HEAD_H = 132;
 const ROW_H = 51;
+const TEAM_COL_W = 300;
 const CAT_WIDTH = 124;
 const SL_WINDOW = 12 * 60 * 60 * 1000;
 const DELTA_WINDOW = 2 * 60 * 60 * 1000;
@@ -137,6 +138,8 @@ export default function ScoreboardGrid({
   const [hoveredName, setHoveredName] = useState(null);
   const [solveHighlight, setSolveHighlight] = useState(null);
   const [screenshotting, setScreenshotting] = useState(false);
+  const [colWidth, setColWidth] = useState(58);
+  const [catWidth, setCatWidth] = useState(CAT_WIDTH);
 
   const model = useMemo(() => {
     const chs = [];
@@ -245,6 +248,29 @@ export default function ScoreboardGrid({
     return model.all.map(toCol);
   }, [model, viewMode, sortMode]);
 
+  useEffect(() => {
+    const update = () => {
+      const el = rootRef.current;
+      if (!el) return;
+      const w = el.clientWidth;
+      const n = Math.max(1, model.all.length);
+      const g = Math.max(1, model.catGroups.length);
+      setColWidth(Math.max(58, Math.floor((w - TEAM_COL_W - 24) / n)));
+      setCatWidth(Math.max(CAT_WIDTH, Math.floor((w - TEAM_COL_W - 24) / g)));
+    };
+    update();
+    let ro = null;
+    if (rootRef.current && typeof ResizeObserver !== 'undefined') {
+      ro = new ResizeObserver(update);
+      ro.observe(rootRef.current);
+    }
+    window.addEventListener('resize', update);
+    return () => {
+      window.removeEventListener('resize', update);
+      if (ro) ro.disconnect();
+    };
+  }, [model.all.length, model.catGroups.length]);
+
   const seriesByName = useMemo(() => {
     const m = new Map();
     (timeline || []).forEach((s) => {
@@ -285,24 +311,25 @@ export default function ScoreboardGrid({
   }, [timeline]);
 
   useEffect(() => {
-    const sliceVisible = (sc) => {
-      if (!sc || !rows.length) return rows.map((r) => r.user_name);
-      const top = sc.scrollTop - HEAD_H;
-      const a = Math.max(0, Math.floor(top / ROW_H));
-      const b = Math.max(a, Math.min(rows.length, Math.ceil((top + sc.clientHeight) / ROW_H)));
-      return rows.slice(a, b).map((r) => r.user_name);
+    const update = () => {
+      const sc = scrollRef.current;
+      if (!sc || !rows.length) return;
+      const tableTop = sc.getBoundingClientRect().top + window.scrollY;
+      const startTop = tableTop + HEAD_H;
+      const from = window.scrollY;
+      const to = window.scrollY + window.innerHeight;
+      const a = Math.max(0, Math.floor((from - startTop) / ROW_H));
+      const b = Math.max(a, Math.min(rows.length, Math.ceil((to - startTop) / ROW_H)));
+      setVisibleNames(rows.slice(a, b).map((r) => r.user_name));
     };
-    setVisibleNames(sliceVisible(scrollRef.current));
+    update();
+    window.addEventListener('scroll', update);
+    window.addEventListener('resize', update);
+    return () => {
+      window.removeEventListener('scroll', update);
+      window.removeEventListener('resize', update);
+    };
   }, [rows]);
-
-  const onScroll = () => {
-    const sc = scrollRef.current;
-    if (!sc || !rows.length) return;
-    const top = sc.scrollTop - HEAD_H;
-    const a = Math.max(0, Math.floor(top / ROW_H));
-    const b = Math.max(a, Math.min(rows.length, Math.ceil((top + sc.clientHeight) / ROW_H)));
-    setVisibleNames(rows.slice(a, b).map((r) => r.user_name));
-  };
 
   useEffect(() => {
     const onKey = (e) => {
@@ -321,7 +348,10 @@ export default function ScoreboardGrid({
   const toggleFocus = (id) => {
     setFocusedId((cur) => {
       const next = cur === id ? null : id;
-      if (next && scrollRef.current) scrollRef.current.scrollTop = 0;
+      if (next && scrollRef.current) {
+        const top = scrollRef.current.getBoundingClientRect().top + window.scrollY - 12;
+        window.scrollTo({ top, behavior: 'smooth' });
+      }
       return next;
     });
   };
@@ -408,7 +438,7 @@ export default function ScoreboardGrid({
   };
 
   return (
-    <div className="sgx" ref={rootRef}>
+    <div className="sgx" ref={rootRef} style={{ '--sgx-colw': `${colWidth}px`, '--sgx-catw': `${catWidth}px` }}>
       {model.all.length > 0 && (
         <div className="sgx-graphwrap" data-screenshot-hidden>
           <ScoreboardGraphPanel
@@ -518,7 +548,6 @@ export default function ScoreboardGrid({
       <div
         className="sgx-scroll"
         ref={scrollRef}
-        onScroll={onScroll}
         onMouseLeave={() => { setHoverCol(null); setHoveredName(null); clearTip(); setSolveHighlight(null); }}
       >
         {model.all.length === 0 ? (
@@ -791,22 +820,12 @@ export default function ScoreboardGrid({
         .sgx-shot:hover { color: var(--text-primary); background: var(--bg-hover); }
         .sgx-shot:disabled { opacity: 0.6; cursor: default; }
 
-        .sgx-scroll {
-          overflow: auto; max-height: min(72vh, 720px); overscroll-behavior: contain; position: relative;
-          scrollbar-width: thin; scrollbar-color: rgba(148,163,184,0.35) transparent;
-        }
-        .sgx-scroll::-webkit-scrollbar { width: 10px; height: 10px; }
-        .sgx-scroll::-webkit-scrollbar-track { background: transparent; }
-        .sgx-scroll::-webkit-scrollbar-thumb {
-          background: rgba(148,163,184,0.28); border-radius: 8px;
-          border: 2px solid transparent; background-clip: padding-box;
-        }
-        .sgx-scroll::-webkit-scrollbar-thumb:hover { background-color: rgba(148,163,184,0.5); background-clip: padding-box; }
+        .sgx-scroll { position: relative; }
         .sgx-table { min-width: max-content; position: relative; }
 
         .sgx-header { position: sticky; top: 0; z-index: 30; display: flex; background: var(--bg-elevated); }
         .sgx-corner {
-          position: sticky; left: 0; z-index: 31; flex-shrink: 0; width: 300px; height: 96px;
+          position: sticky; left: 0; z-index: 31; flex-shrink: 0; width: 300px; height: 132px;
           display: flex; flex-direction: column; justify-content: space-between;
           padding: 10px 14px; background: var(--bg-elevated);
           border-bottom: 1px solid rgba(255,255,255,0.07); border-right: 1px solid rgba(255,255,255,0.07);
@@ -815,17 +834,17 @@ export default function ScoreboardGrid({
         .sgx-corner-score { font-size: 0.8rem; font-weight: 600; color: var(--text-muted); text-transform: uppercase; }
         .sgx-hcells { display: flex; }
         .sgx-hcell {
-          position: relative; width: 58px; height: 96px; flex-shrink: 0;
+          position: relative; width: var(--sgx-colw, 58px); height: 132px; flex-shrink: 0;
           display: flex; flex-direction: column; align-items: center;
           border-left: 1px solid rgba(255,255,255,0.04); border-bottom: 1px solid rgba(255,255,255,0.07);
           background: var(--bg-elevated); transition: background 0.12s ease;
         }
         .sgx-hcell[data-hovercol] { background: rgba(255,255,255,0.06); }
         .sgx-hcell[data-dim] { opacity: 0.3; }
-        .sgx-hcell.sgx-hcat { width: 124px; }
-        .sgx-hpts { font-size: 0.72rem; color: var(--text-primary); opacity: 0.8; margin-top: 8px; font-variant-numeric: tabular-nums; position: relative; z-index: 2; }
+        .sgx-hcell.sgx-hcat { width: var(--sgx-catw, 124px); }
+        .sgx-hpts { font-size: 0.72rem; color: var(--text-primary); opacity: 0.8; margin-top: 10px; font-variant-numeric: tabular-nums; position: relative; z-index: 2; }
         .sgx-hname {
-          position: absolute; left: calc(50% + 3px); bottom: 12px; transform-origin: bottom left; transform: rotate(-45deg);
+          position: absolute; left: calc(50% + 3px); bottom: 14px; transform-origin: bottom left; transform: rotate(-45deg);
           background: transparent; border: 0; padding: 0; max-width: none;
           font-family: var(--font-sans); font-size: 0.8rem; color: var(--text-primary); cursor: pointer;
           white-space: nowrap; transition: color 0.15s ease; z-index: 4; line-height: 1.2;
@@ -836,7 +855,7 @@ export default function ScoreboardGrid({
 
         .sgx-row { display: flex; background: var(--bg-surface); transition: background 0.15s ease; }
         .sgx-row[data-self] { background: rgba(99,102,241,0.08); }
-        .sgx-row[data-pin] { position: sticky; top: 96px; z-index: 16; box-shadow: 0 6px 16px rgba(0,0,0,0.28); background: var(--bg-surface); }
+        .sgx-row[data-pin] { position: sticky; top: 132px; z-index: 16; box-shadow: 0 6px 16px rgba(0,0,0,0.28); background: var(--bg-surface); }
         .sgx-row:hover { background: rgba(255,255,255,0.03); }
         .sgx-row[data-self]:hover { background: rgba(99,102,241,0.12); }
         .sgx-team {
@@ -866,12 +885,12 @@ export default function ScoreboardGrid({
         .sgx-score small { font-size: 0.66rem; color: var(--text-muted); }
         .sgx-cells { display: flex; flex-shrink: 0; }
         .sgx-cell {
-          width: 58px; height: 50px; flex-shrink: 0;
+          width: var(--sgx-colw, 58px); height: 50px; flex-shrink: 0;
           display: flex; align-items: center; justify-content: center;
           border-left: 1px solid rgba(255,255,255,0.04); border-bottom: 1px solid rgba(255,255,255,0.05);
           transition: background 0.12s ease;
         }
-        .sgx-cell.sgx-catcell { width: 124px; }
+        .sgx-cell.sgx-catcell { width: var(--sgx-catw, 124px); }
         .sgx-row:hover .sgx-cell[data-hovercol] { background: rgba(255,255,255,0.07); }
         .sgx-cell[data-hovercol] { background: rgba(255,255,255,0.05); }
         .sgx-cell[data-dim] { opacity: 0.25; }

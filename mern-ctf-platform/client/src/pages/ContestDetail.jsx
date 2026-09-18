@@ -1117,7 +1117,7 @@ export default function ContestDetail() {
                 </div>
               ) : (
                 <>
-                  <div className="neon-card p-0" style={{ overflow: 'hidden' }}>
+                  <div className="neon-card p-0">
                     <ScoreboardGrid
                       scoreboard={scoreboard}
                       challengesByCategory={challenges}
