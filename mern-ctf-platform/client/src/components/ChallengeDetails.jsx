@@ -203,7 +203,7 @@ function ChallengeDetailsView({ challenge, userProgress, onSubmit, onClose }) {
       <style>{`
         .cde {
           display: flex; flex-direction: column;
-          height: 100%; min-height: 0;
+          height: auto; min-height: 0;
           background: var(--bg-surface);
           border: 1px solid rgba(255,255,255,0.08);
           border-radius: var(--radius-md);
@@ -366,6 +366,7 @@ export function ChallengeDrawer({ open, challenge, userProgress, onSubmit, onClo
           width: 100%; max-width: 720px; height: min(88dvh, 640px);
           animation: cdeSlideUp 0.3s ease;
         }
+        .cde-drawer-sheet .cde { height: 100%; }
         @keyframes cdeFade { from { opacity: 0; } to { opacity: 1; } }
         @keyframes cdeSlideUp { from { transform: translateY(24px); opacity: 0.6; } to { transform: translateY(0); opacity: 1; } }
       `}</style>

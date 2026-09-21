@@ -1,6 +1,7 @@
 import { useMemo, useState, useRef, useEffect } from 'react';
 import api from '../utils/api';
 import ScoreboardGraphPanel from './ScoreboardGraphPanel';
+import { categoryScheme, rgbaOf } from '../utils/categories';
 
 const BLOOD_PATHS = [
   'M12 2c5.523 0 10 4.477 10 10s-4.477 10-10 10S2 17.523 2 12S6.477 2 12 2m.994 5.886c-.083-.777-1.008-1.16-1.617-.67l-.084.077l-2 2l-.083.094a1 1 0 0 0 0 1.226l.083.094l.094.083a1 1 0 0 0 1.226 0l.094-.083l.293-.293V16l.007.117a1 1 0 0 0 1.986 0L13 16V8z',
@@ -11,20 +12,6 @@ const BLOOD_PATHS = [
 const BLOOD_LABELS = ['First blood', 'Second blood', 'Third blood'];
 const MEDAL_COLORS = ['#ffd700', '#d7dbe0', '#cd7f32'];
 const RANK_COLORS = { 1: '#ffd700', 2: '#d7dbe0', 3: '#cd7f32' };
-
-const CAT_COLORS = {
-  web: 'var(--category-web)',
-  crypto: 'var(--category-crypto)',
-  pwn: 'var(--category-pwn)',
-  osint: 'var(--category-osint)',
-  forensics: 'var(--category-forensic)',
-  forensic: 'var(--category-forensic)',
-  stego: 'var(--category-stego)',
-  steg: 'var(--category-stego)',
-  misc: 'var(--category-misc)',
-  reverse: 'var(--category-reverse)',
-  reversing: 'var(--category-reverse)',
-};
 
 const HEAD_H = 132;
 const ROW_H = 51;
@@ -41,7 +28,8 @@ const SCREENSHOT_CSS_VARS = [
   '--category-forensic', '--category-stego', '--category-misc', '--category-reverse',
 ];
 
-const catColor = (cat) => CAT_COLORS[String(cat || '').toLowerCase()] || 'var(--text-secondary)';
+const catColor = (cat) => categoryScheme(cat).f1;
+const catWash = (cat, alpha) => rgbaOf(categoryScheme(cat).f1, alpha);
 
 const titleCase = (s) =>
   String(s || '')
@@ -567,6 +555,7 @@ export default function ScoreboardGrid({
                       <div
                         className="sgx-hcell sgx-hcat"
                         key={col.key}
+                        style={{ '--cat-fg': catColor(g.category) }}
                         data-col={col.key}
                         data-hovercol={hoverCol === col.key ? '' : undefined}
                         onMouseEnter={(e) => {
@@ -593,6 +582,7 @@ export default function ScoreboardGrid({
                     <div
                       className="sgx-hcell"
                       key={col.key}
+                      style={{ '--cat-fg': catColor(ch.category) }}
                       data-focused={focused || undefined}
                       data-dim={dim ? '' : undefined}
                       data-col={col.key}
@@ -612,7 +602,7 @@ export default function ScoreboardGrid({
                       <button type="button" className="sgx-hname" onClick={() => toggleFocus(ch.id)}>
                         {ch.name}
                       </button>
-                      <span className="sgx-hband" style={{ background: catColor(ch.category) }}></span>
+                      <span className="sgx-hband" style={{ background: catColor(ch.category), boxShadow: `0 0 6px ${catWash(ch.category, 0.8)}` }}></span>
                     </div>
                   );
                 })}
@@ -697,18 +687,18 @@ export default function ScoreboardGrid({
                             onMouseMove={moveTip}
                           >
                             {allSolved ? (
-                              <i className="fas fa-check sgx-catcheck"></i>
+                              <i className="fas fa-check sgx-catcheck" style={{ color: catColor(g.category) }}></i>
                             ) : solvedCount > 0 ? (
                               <span
                                 className="sgx-progress"
                                 style={{
-                                  background: `conic-gradient(var(--accent) ${Math.round((solvedCount / total) * 360)}deg, rgba(148,163,184,0.25) 0deg)`,
+                                  background: `conic-gradient(${catColor(g.category)} ${Math.round((solvedCount / total) * 360)}deg, rgba(148,163,184,0.25) 0deg)`,
                                 }}
                               >
                                 <i></i>
                               </span>
                             ) : (
-                              <span className="sgx-ring" data-unsolved=""></span>
+                              <span className="sgx-ring" data-unsolved="" style={{ borderColor: catWash(g.category, 0.45) }}></span>
                             )}
                           </div>
                         );
@@ -842,11 +832,11 @@ export default function ScoreboardGrid({
         .sgx-hcell[data-hovercol] { background: rgba(255,255,255,0.06); }
         .sgx-hcell[data-dim] { opacity: 0.3; }
         .sgx-hcell.sgx-hcat { width: var(--sgx-catw, 124px); }
-        .sgx-hpts { font-size: 0.72rem; color: var(--text-primary); opacity: 0.8; margin-top: 10px; font-variant-numeric: tabular-nums; position: relative; z-index: 2; }
+        .sgx-hpts { font-size: 0.72rem; color: var(--cat-fg, var(--text-primary)); opacity: 0.92; margin-top: 10px; font-variant-numeric: tabular-nums; position: relative; z-index: 2; }
         .sgx-hname {
           position: absolute; left: calc(50% + 3px); bottom: 14px; transform-origin: bottom left; transform: rotate(-45deg);
           background: transparent; border: 0; padding: 0; max-width: none;
-          font-family: var(--font-sans); font-size: 0.8rem; color: var(--text-primary); cursor: pointer;
+          font-family: var(--font-sans); font-size: 0.8rem; color: var(--cat-fg, var(--text-primary)); cursor: pointer;
           white-space: nowrap; transition: color 0.15s ease; z-index: 4; line-height: 1.2;
         }
         .sgx-hname:hover { color: var(--accent); z-index: 7; }

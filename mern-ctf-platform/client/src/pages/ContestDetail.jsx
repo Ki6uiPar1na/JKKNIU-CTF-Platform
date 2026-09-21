@@ -1065,7 +1065,8 @@ export default function ContestDetail() {
                 .rctf-detail-pane {
                   flex: 0 0 calc(50% - 0.5rem); width: calc(50% - 0.5rem);
                   position: sticky; top: 1rem;
-                  height: max(calc(100dvh - 2rem), 560px);
+                  max-height: calc(100dvh - 2rem);
+                  margin-bottom: 3rem;
                 }
                 @media (max-width: 920px) {
                   .rctf-detail-pane { display: none; }
