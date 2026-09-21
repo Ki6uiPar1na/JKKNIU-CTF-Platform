@@ -5,189 +5,10 @@ import api from '../utils/api';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../components/Toast';
 import ScoreboardGrid from '../components/ScoreboardGrid';
+import ChallengeBrowser from '../components/ChallengeBrowser';
+import ChallengeDetailsPane, { ChallengeDrawer } from '../components/ChallengeDetails';
 import { playSuccessSound, playNotificationSound } from '../utils/sound';
 import useServerTime from '../hooks/useServerTime';
-
-function ChallengeModal({ challenge, userProgress, onClose, onSubmit }) {
-  const [flag, setFlag] = useState('');
-  const [hints, setHints] = useState([]);
-  const [paidHints, setPaidHints] = useState([]);
-  const [revealed, setRevealed] = useState({});
-  const [hintsLoading, setHintsLoading] = useState(false);
-  const [revealing, setRevealing] = useState(null);
-  const { showToast } = useToast();
-  const [activeTab, setActiveTab] = useState('overview');
-
-  useEffect(() => {
-    const contestId = window.location.pathname.split('/')[2];
-    if (!contestId) return;
-    setHintsLoading(true);
-    api.get(`/contests/${contestId}/challenges/${challenge._id}/hints`)
-      .then(res => {
-        if (res.data.success) {
-          setHints(res.data.hints || []);
-          setPaidHints(res.data.paid_hints || []);
-          const ids = {};
-          (res.data.revealed_ids || []).forEach(id => { ids[id] = true; });
-          setRevealed(ids);
-        }
-      })
-      .catch(() => {})
-      .finally(() => setHintsLoading(false));
-  }, [challenge._id]);
-
-  const handleRevealHint = async (hintId) => {
-    const contestId = window.location.pathname.split('/')[2];
-    setRevealing(hintId);
-    try {
-      const res = await api.post(`/contests/${contestId}/hints/${hintId}/reveal`);
-      if (res.data.success) {
-        setRevealed({ ...revealed, [hintId]: true });
-        showToast(res.data.message || 'Hint revealed!', 'success');
-      }
-    } catch (err) {
-      showToast(err.response?.data?.error || 'Failed to reveal hint', 'error');
-    } finally {
-      setRevealing(null);
-    }
-  };
-
-  const allHints = [...hints, ...paidHints];
-  const hasHints = allHints.length > 0;
-  const isPractice = challenge.submission_enabled === 0;
-
-  return (
-    <div className="modal fade show d-block" tabIndex="-1" style={{ background: 'rgba(8, 10, 22, 0.5)', backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)' }} onClick={onClose}>
-      <div className="modal-dialog modal-dialog-centered modal-dialog-scrollable" style={{ maxWidth: '1050px', width: 'calc(100% - 2rem)' }} onClick={e => e.stopPropagation()}>
-        <div className="modal-content" style={{ background: 'linear-gradient(160deg, rgba(35, 39, 66, 0.82), rgba(18, 20, 38, 0.82))', backdropFilter: 'blur(24px) saturate(140%)', WebkitBackdropFilter: 'blur(24px) saturate(140%)', border: '1px solid rgba(255, 255, 255, 0.12)', borderRadius: '1rem', boxShadow: '0 16px 60px rgba(0, 0, 0, 0.55)' }}>
-          <div className="modal-header" style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.08)', background: 'transparent' }}>
-            <h5 className="modal-title"><i className="fas fa-laptop-code me-2"></i>Challenge</h5>
-            <button type="button" className="btn-close" onClick={onClose}></button>
-          </div>
-          <div className="modal-body">
-            <h4 className="fw-bold mb-2 text-center" style={{ color: 'var(--accent)' }}>{challenge.name}</h4>
-            <div className="text-center mb-1">
-              <span className="badge" style={{ background: 'rgba(99,102,241,0.1)', color: 'var(--accent)', border: '1px solid rgba(99,102,241,0.2)' }}>
-                <i className="fas fa-star me-1 text-warning"></i>{challenge.point} pts
-              </span>
-            </div>
-            <div className="d-flex justify-content-center gap-3 mb-3">
-              <span className="badge" style={{ background: 'rgba(255,255,255,0.04)', color: 'var(--text-secondary)', border: '1px solid rgba(255,255,255,0.06)' }}>
-                <i className="fas fa-tag me-1"></i>{challenge.category}
-              </span>
-              <span className="badge" style={{ background: 'rgba(74,222,128,0.1)', color: '#4ade80', border: '1px solid rgba(74,222,128,0.25)' }} title="Total solves">
-                <i className="fas fa-user-check me-1"></i>{challenge.solves?.count ?? 0} solve{(challenge.solves?.count ?? 0) !== 1 ? 's' : ''}
-              </span>
-            </div>
-
-            <ul className="nav nav-tabs mb-3 justify-content-center" style={{ borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
-              <li className="nav-item">
-                <button type="button" className={`nav-link ${activeTab === 'overview' ? 'active' : ''}`} onClick={() => setActiveTab('overview')}
-                  style={{ color: activeTab === 'overview' ? 'var(--accent)' : 'var(--text-secondary)', fontSize: '0.85rem' }}>
-                  <i className="fas fa-book me-1"></i>Overview
-                </button>
-              </li>
-              <li className="nav-item">
-                <button type="button" className={`nav-link ${activeTab === 'solvers' ? 'active' : ''}`} onClick={() => setActiveTab('solvers')}
-                  style={{ color: activeTab === 'solvers' ? 'var(--accent)' : 'var(--text-secondary)', fontSize: '0.85rem' }}>
-                  <i className="fas fa-users me-1"></i>Solvers
-                </button>
-              </li>
-            </ul>
-
-            {activeTab === 'solvers' ? (
-              <div>
-                <div className="mb-3 d-flex align-items-center gap-2" style={{ color: '#4ade80', fontWeight: 600 }}>
-                  <i className="fas fa-trophy"></i>
-                  {challenge.solves?.count ?? 0} solve{(challenge.solves?.count ?? 0) !== 1 ? 's' : ''} on this challenge
-                </div>
-                {(challenge.solves?.solvers || []).length > 0 ? (
-                  <div style={{ maxHeight: '300px', overflowY: 'auto' }}>
-                    {challenge.solves.solvers.map((name, i) => (
-                      <div key={name} className="p-2 mb-1 d-flex align-items-center gap-2" style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 'var(--radius)' }}>
-                        <span style={{ color: 'var(--accent)', fontSize: '0.8rem', width: '22px' }}>{i + 1}.</span>
-                        <i className="fas fa-user" style={{ color: 'var(--text-secondary)' }}></i>
-                        <span style={{ fontSize: '0.9rem' }}>{name}</span>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-secondary" style={{ fontSize: '0.9rem' }}>No one has solved this challenge yet. Be the first!</p>
-                )}
-              </div>
-            ) : (
-              <>
-                <div className="mb-4" style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', lineHeight: '1.7', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}
-                  dangerouslySetInnerHTML={{ __html: sanitize(challenge.description) }} />
-
-                {challenge.files && challenge.files.length > 0 && (
-                  <div className="mb-4">
-                    <h6 className="fw-bold mb-2"><i className="fas fa-paperclip me-2" style={{ color: 'var(--accent)' }}></i>Attachments</h6>
-                    <div className="d-flex flex-wrap gap-2">
-                      {challenge.files.map((f, i) => (
-                        <a key={i} href={f} download className="btn btn-neon-outline btn-sm" style={{ fontSize: '0.8rem' }}>
-                          <i className="fas fa-download me-1"></i>{f.split('/').pop()}
-                        </a>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {hasHints && (
-                  <div className="mb-4">
-                    <h6 className="fw-bold mb-2"><i className="fas fa-lightbulb me-2" style={{ color: '#facc15' }}></i>Hints</h6>
-                    {hintsLoading ? <div className="spinner-neon" style={{ height: '24px' }}></div> : allHints.map(h => (
-                      <div key={h._id} className="mb-2 p-2" style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 'var(--radius)', borderLeft: '3px solid #facc15' }}>
-                        {h.cost === 0 || revealed[h._id] || isPractice ? (
-                          <span style={{ fontSize: '0.85rem' }}>{h.content}</span>
-                        ) : (
-                          <div className="d-flex justify-content-between align-items-center">
-                            <span style={{ color: 'var(--text-muted)', fontSize: '0.85rem', fontStyle: 'italic' }}>Hint costs {h.cost} pts to reveal</span>
-                            <button className="btn btn-neon-outline btn-sm py-0 px-2" style={{ fontSize: '0.75rem' }} disabled={revealing === h._id} onClick={() => handleRevealHint(h._id)}>
-                              <i className="fas fa-eye me-1"></i> {revealing === h._id ? 'Revealing...' : `Reveal (${h.cost} pts)`}
-                            </button>
-                          </div>
-                        )}
-                        <span className={`badge ${h.cost === 0 ? 'bg-success' : 'bg-warning text-dark'} ms-2`} style={{ fontSize: '0.6rem' }}>
-                          {h.cost === 0 ? (isPractice ? 'Free (practice)' : 'Free') : `${h.cost} pts`}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {challenge.submission_enabled === 0 && (
-                  <div className="alert alert-warning py-2 mb-3" role="alert">
-                    <i className="fas fa-dumbbell me-2"></i><strong>Practice mode.</strong> This challenge is locked for points — you can still test your flag here, but no points will be awarded.
-                  </div>
-                )}
-                <div className="mb-3">
-                  <label className="form-label"><i className="fas fa-flag me-1"></i>Submit Flag</label>
-                  <input type="text" className="form-control" value={flag} onChange={e => setFlag(e.target.value)} placeholder="FLAG{...}" onKeyDown={e => { if (e.key === 'Enter' && flag.trim()) onSubmit(flag); }} />
-                </div>
-                <div className="d-flex gap-3 flex-wrap small">
-                  <span style={{ color: 'var(--text-muted)' }}><i className="fas fa-bomb me-1"></i>Max attempts: {challenge.submission_enabled === 0 ? 'Unlimited (practice)' : challenge.max_attempts}</span>
-                  <span style={{ color: 'var(--text-muted)' }}><i className="fas fa-upload me-1"></i>Submissions: {userProgress[challenge._id]?.total_submissions || 0}</span>
-                  {challenge.submission_enabled === 1 && (
-                    <span style={{ color: 'var(--text-muted)' }}><i className="fas fa-shield-alt me-1"></i>Remaining: {userProgress[challenge._id]?.remaining_attempts ?? challenge.max_attempts}</span>
-                  )}
-                </div>
-              </>
-            )}
-          </div>
-          <div className="modal-footer" style={{ borderTop: '1px solid rgba(255, 255, 255, 0.08)', background: 'transparent' }}>
-            <button className="btn btn-neon-outline btn-sm" onClick={onClose}>Cancel</button>
-            {activeTab === 'overview' && (
-              <button className="btn btn-neon btn-sm" onClick={() => onSubmit(flag)} disabled={!flag.trim() || (challenge.submission_enabled === 1 && userProgress[challenge._id]?.remaining_attempts === 0)}>
-                <i className="fas fa-paper-plane me-1"></i> Submit
-              </button>
-            )}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 export default function ContestDetail() {
   const { id, inviteCode } = useParams();
@@ -213,6 +34,7 @@ export default function ContestDetail() {
   const [loading, setLoading] = useState(true);
   const now = useServerTime();
   const [tick, setTick] = useState(0);
+  const [isNarrow, setIsNarrow] = useState(() => window.matchMedia('(max-width: 920px)').matches);
   const [myTeam, setMyTeam] = useState(null);
   const [teamLoading, setTeamLoading] = useState(false);
   const [teamForm, setTeamForm] = useState({ name: '', password: '', joinName: '', joinPassword: '' });
@@ -270,6 +92,13 @@ export default function ContestDetail() {
   useEffect(() => {
     const refresh = setInterval(() => setTick(t => t + 1), 10000);
     return () => clearInterval(refresh);
+  }, []);
+
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 920px)');
+    const fn = e => setIsNarrow(e.matches);
+    mq.addEventListener('change', fn);
+    return () => mq.removeEventListener('change', fn);
   }, []);
 
   useEffect(() => {
@@ -501,16 +330,15 @@ export default function ContestDetail() {
       });
       const d = res.data;
       showToast(d.message, d.submission_type !== 'incorrect' ? 'success' : 'error');
-      if (d.submission_type === 'correct' && !d.practice) { playSuccessSound(); closeModal(); loadChallenges(); loadScoreboard(); }
+      if (d.submission_type === 'correct' && !d.practice) {
+        playSuccessSound();
+        loadChallenges();
+        loadScoreboard();
+      }
       else if (d.success) { loadChallenges(); }
     } catch (err) {
       showToast(err.response?.data?.message || 'Error submitting flag', 'error');
     }
-  };
-
-  const getCategoryColor = (cat) => {
-    const colors = { web: '#ff6b6b', cryptography: '#4dabf7', pwn: '#ffd43b', osint: '#22b8cf', forensic: '#da77f2', steganography: '#ff922b', misc: '#9775fa', 'reverse-engg': '#20c997' };
-    return colors[cat?.toLowerCase().replace(/\s+/g, '-')] || 'var(--accent)';
   };
 
   const getRankClass = (rank) => {
@@ -563,7 +391,7 @@ export default function ContestDetail() {
       </div>
 
       <div className="row">
-      <div className={`col-lg-${tab === 'challenges' && canParticipate ? '9' : '12'}`}>
+      <div className="col-12">
 
       {contest.startDate && contest.endDate && (() => {
         const start = new Date(contest.startDate);
@@ -1136,7 +964,7 @@ export default function ContestDetail() {
                           <span className="fw-bold" style={{ color: 'var(--text-primary)' }}>Your Standing</span>
                         </div>
                         <div className="d-flex align-items-center gap-3">
-                          <span className="fw-bold" style={{ color: isTeamContest ? 'var(--accent)' : 'var(--accent)' }}>#{myEntry.rank}</span>
+                          <span className="fw-bold" style={{ color: 'var(--accent)' }}>#{myEntry.rank}</span>
                           <span className="fw-bold" style={{ color: 'var(--text-secondary)' }}>{myEntry.total_score.toLocaleString()} pts</span>
                         </div>
                       </div>
@@ -1170,16 +998,6 @@ export default function ContestDetail() {
           );
         }
 
-        const visibleGroups = Object.entries(challenges)
-          .filter(([cat]) => filter === 'all' || filter === cat)
-          .map(([category, chs]) => {
-            const list = solveFilter === 'all'
-              ? chs
-              : chs.filter(c => solveFilter === 'open' ? c.submission_enabled !== 0 : c.submission_enabled === 0);
-            return [category, list];
-          })
-          .filter(([, list]) => list.length > 0);
-
         const challengeContent = (
           <>
             {contestStatus === 'archived' && (
@@ -1196,7 +1014,7 @@ export default function ContestDetail() {
                 <i className="fas fa-dumbbell me-1" style={{ color: '#facc15' }}></i>Practice
               </button>
             </div>
-            <div className="d-flex gap-2 mb-4 flex-wrap">
+            <div className="d-flex gap-2 mb-3 flex-wrap">
               <button className={`filter-link btn text-start ${filter === 'all' ? 'active' : ''}`} onClick={() => setFilter('all')} style={{ width: 'auto' }}>
                 <i className="fas fa-th-list me-1"></i>All
               </button>
@@ -1206,70 +1024,53 @@ export default function ContestDetail() {
                 </button>
               ))}
             </div>
-            {visibleGroups.length === 0 ? (
-              <div className="text-center py-5">
-                <i className="fas fa-puzzle-piece" style={{ fontSize: '2.5rem', color: 'var(--text-muted)' }}></i>
-                <p className="mt-3 text-secondary">No challenges available yet.</p>
+            <div className="rctf-layout">
+              <div className="rctf-list-pane">
+                <ChallengeBrowser
+                  challenges={challenges}
+                  categories={categories}
+                  filter={filter}
+                  setFilter={setFilter}
+                  solveFilter={solveFilter}
+                  setSolveFilter={setSolveFilter}
+                  userProgress={userProgress}
+                  user={user}
+                  selfIdentity={isTeamContest ? myTeam?.name : user?.user_name}
+                  selected={modal}
+                  openChallenge={openChallenge}
+                  onChanged={loadChallenges}
+                />
               </div>
-            ) : (
-              visibleGroups.map(([category, chs]) => (
-                <div key={category} className="mb-4">
-                  <h3 className="category-title d-flex align-items-center gap-2">
-                    <span style={{ display: 'inline-block', width: '10px', height: '10px', borderRadius: '50%', background: getCategoryColor(category) }}></span>
-                    {category}
-                    <span className="badge" style={{ background: 'rgba(255,255,255,0.04)', color: 'var(--text-muted)', fontWeight: 400, fontSize: '0.75rem' }}>{chs.length}</span>
-                  </h3>
-                  <div className="row g-3">
-                    {chs.map(ch => {
-                      const progress = userProgress[ch._id] || {};
-                      let statusClass = '';
-                      if (progress.status === 'solved') statusClass = 'status-solved';
-                      else if (progress.status === 'tried') statusClass = 'status-tried';
-                      const color = getCategoryColor(category);
-                      return (
-                        <div key={ch._id} className="col-12 col-sm-6 col-md-4 col-lg-3">
-                          <div className={`challenge-card ${statusClass}`}
-                            style={{ borderColor: color, boxShadow: `0 0 0 1px ${color}20`, position: 'relative' }}
-                            onClick={() => openChallenge(ch)}>
-                            {user && (user.role === 0 || user.role === 2) && (
-                              <div className="d-flex gap-1 mb-2 flex-wrap" onClick={e => e.stopPropagation()}
-                                style={{ position: 'absolute', top: '6px', right: '6px' }}>
-                                <button className="btn btn-sm"
-                                  style={{ padding: '0.15rem 0.35rem', fontSize: '0.65rem', border: '1px solid rgba(99,102,241,0.3)', borderRadius: 'var(--radius)', color: ch.visibility === 0 ? '#f87171' : 'var(--accent)', background: ch.visibility === 0 ? 'rgba(248,113,113,0.1)' : 'rgba(99,102,241,0.1)' }}
-                                  onClick={async () => { try { await api.put(`/admin/challenges/${ch._id}/toggle-visibility`); loadChallenges(); } catch {} }}
-                                  title={ch.visibility === 0 ? 'Hidden - click to show' : 'Visible - click to hide'}>
-                                  <i className={`fas ${ch.visibility === 0 ? 'fa-eye-slash' : 'fa-eye'}`}></i>
-                                </button>
-                                <button className="btn btn-sm"
-                                  style={{ padding: '0.15rem 0.35rem', fontSize: '0.65rem', border: `1px solid ${ch.submission_enabled === 0 ? 'rgba(248,113,113,0.5)' : 'rgba(34,197,94,0.4)'}`, borderRadius: 'var(--radius)', color: ch.submission_enabled === 0 ? '#f87171' : '#4ade80', background: ch.submission_enabled === 0 ? 'rgba(248,113,113,0.1)' : 'rgba(34,197,94,0.1)' }}
-                                  onClick={async () => { try { await api.put(`/admin/challenges/${ch._id}/toggle-submission`); loadChallenges(); } catch {} }}
-                                  title={ch.submission_enabled === 0 ? 'Practice (locked) — click to open for points' : 'Open — click to lock (practice only)'}>
-                                  <i className={`fas ${ch.submission_enabled === 0 ? 'fa-lock' : 'fa-lock-open'}`}></i>
-                                </button>
-                                <button className="btn btn-sm"
-                                  style={{ padding: '0.15rem 0.35rem', fontSize: '0.65rem', border: '1px solid rgba(248,113,113,0.3)', borderRadius: 'var(--radius)', color: '#f87171' }}
-                                  onClick={async () => { if (!confirm('Delete this challenge?')) return; try { await api.delete(`/admin/challenges/${ch._id}`); loadChallenges(); loadScoreboard(); } catch {} }}
-                                  title="Delete challenge">
-                                  <i className="fas fa-trash"></i>
-                                </button>
-                              </div>
-                            )}
-                            <h5>{ch.name}</h5>
-                            <div className="points-badge"><i className="fas fa-star"></i> {ch.point} pts</div>
-                            {ch.submission_enabled === 0 && <span style={{ fontSize: '0.75rem', color: '#facc15' }}><i className="fas fa-dumbbell me-1"></i>Practice (no points)</span>}
-                            {progress.status === 'solved' && <span style={{ fontSize: '0.75rem', color: '#4ade80' }}><i className="fas fa-check-circle me-1"></i>Solved</span>}
-                            {progress.status === 'tried' && <span style={{ fontSize: '0.75rem', color: '#f87171' }}><i className="fas fa-exclamation-circle me-1"></i>Tried</span>}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              ))
+              <div className="rctf-detail-pane">
+                <ChallengeDetailsPane
+                  challenge={modal}
+                  userProgress={userProgress}
+                  onSubmit={handleSubmitFlag}
+                  onClose={closeModal}
+                />
+              </div>
+            </div>
+            {isNarrow && (
+              <ChallengeDrawer
+                open={!!modal}
+                challenge={modal}
+                userProgress={userProgress}
+                onSubmit={handleSubmitFlag}
+                onClose={closeModal}
+              />
             )}
-            {modal && (
-              <ChallengeModal challenge={modal} userProgress={userProgress} onClose={closeModal} onSubmit={handleSubmitFlag} />
-            )}
+            <style>{`
+                .rctf-layout { display: flex; align-items: flex-start; gap: 1rem; }
+                .rctf-list-pane { flex: 1 1 calc(50% - 0.5rem); min-width: 0; }
+                .rctf-detail-pane {
+                  flex: 0 0 calc(50% - 0.5rem); width: calc(50% - 0.5rem);
+                  position: sticky; top: 1rem;
+                  height: max(calc(100dvh - 2rem), 560px);
+                }
+                @media (max-width: 920px) {
+                  .rctf-detail-pane { display: none; }
+                }
+              `}</style>
           </>
         );
 
@@ -1402,72 +1203,6 @@ export default function ContestDetail() {
       })()}
     </div>
 
-    {/* ─── Right Sidebar ─── */}
-    {tab === 'challenges' && canParticipate && (
-    <div className="col-lg-3">
-      <div className="neon-card p-3 mb-4">
-        <h6 className="fw-bold mb-3" style={{ color: 'var(--text-muted)', fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-          <i className="fas fa-user me-1"></i> Your Standing
-        </h6>
-        {!user ? (
-          <p className="small" style={{ color: 'var(--text-muted)' }}>Log in to see your standing.</p>
-        ) : scoreboardHidden ? (
-          <p className="small" style={{ color: 'var(--text-muted)' }}><i className="fas fa-eye-slash me-1"></i>Scoreboard is hidden.</p>
-        ) : myEntry ? (
-          <div>
-            <div className="d-flex justify-content-between align-items-center mb-2">
-              <span className="fw-bold" style={{ fontSize: '1.1rem' }}>{myEntry.user_name}</span>
-            </div>
-            <div className="d-flex gap-3">
-              <div className="p-2" style={{ background: 'rgba(99,102,241,0.08)', borderRadius: 'var(--radius)', flex: 1, textAlign: 'center' }}>
-                <div className="small" style={{ color: 'var(--text-muted)' }}>Rank</div>
-                <div className="fw-bold fs-5" style={{ color: 'var(--accent)' }}>#{myEntry.rank}</div>
-              </div>
-              <div className="p-2" style={{ background: 'rgba(99,102,241,0.08)', borderRadius: 'var(--radius)', flex: 1, textAlign: 'center' }}>
-                <div className="small" style={{ color: 'var(--text-muted)' }}>Score</div>
-                <div className="fw-bold fs-5" style={{ color: 'var(--accent)' }}>{myEntry.total_score}</div>
-              </div>
-            </div>
-          </div>
-        ) : (
-          <p className="small" style={{ color: 'var(--text-muted)' }}>
-            <i className="fas fa-spinner fa-spin me-1"></i>Loading...
-          </p>
-        )}
-      </div>
-
-      <div className="neon-card p-3">
-        <h6 className="fw-bold mb-3" style={{ color: 'var(--text-muted)', fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <span><i className="fas fa-bell me-1"></i> Notifications</span>
-          {notifications.length > 3 && (
-            <button className="btn btn-sm py-0 px-1" style={{ color: 'var(--accent)', fontSize: '0.7rem', border: '1px solid rgba(99,102,241,0.3)', borderRadius: 'var(--radius)' }} onClick={() => setTab('notifications')}>
-              View all ({notifications.length})
-            </button>
-          )}
-        </h6>
-        {notifications.length === 0 ? (
-          <p className="small" style={{ color: 'var(--text-muted)' }}>No notifications yet.</p>
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
-            {notifications.slice(0, 3).map(n => (
-              <div key={n._id} className="p-2" style={{
-                background: 'rgba(99,102,241,0.04)',
-                borderLeft: '3px solid var(--accent)',
-                borderRadius: 'var(--radius)',
-              }}>
-                <div className="d-flex align-items-center gap-1 mb-1">
-                  <i className="fas fa-bell" style={{ color: 'var(--accent)', fontSize: '0.65rem' }}></i>
-                  <strong style={{ fontSize: '0.78rem' }}>{n.title}</strong>
-                </div>
-                {n.content && <p className="mb-0" style={{ color: 'var(--text-secondary)', fontSize: '0.7rem' }}>{n.content}</p>}
-                <small style={{ color: 'var(--text-muted)', fontSize: '0.6rem' }}>{new Date(n.createdAt).toLocaleString()}</small>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-    </div>
-    )}
     </div>
     </div>
   );
